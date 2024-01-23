@@ -1,0 +1,19 @@
+[secrets]
+#Email credentials
+IMAPSERVER = some server
+IMAPPORT = 993
+EMAIL = someemail@example.com
+PASSWORD = averystrongpassword
+
+#Telegram credentials
+TELEGRAMTOKEN = token
+CHATID = -chatid
+
+#SSH Credentials
+SSH_HOST = ip address
+SSH_PORT = port number
+SSH_USERNAME = username
+SSH_PASSWORD = anotherverystrongpassword
+
+#HTTP API IP address (FreePBX)
+PBXIP = IP of a PBX
