@@ -84,7 +84,7 @@ def avics(update: Update, context: CallbackContext) -> None:
 
 def info(update: Update, context: CallbackContext):
     if update.message.chat.type == "group":
-        with open("info.txt", "r") as file:
+        with open("/config/info.txt", "r") as file:
             info = file.read()
         update.message.reply_text(f"Beschikbare commando's: \n \n{info}")
 
