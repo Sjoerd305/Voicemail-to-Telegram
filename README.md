@@ -16,7 +16,7 @@ Retrieves emails using IMAP, extracts the text and voicemail message. Parses the
 
 Using Docker is prefered because of various dependencies
 - Dockerfile
-- docker run --name voicemailapp -d --restart unless-stopped -v "map directory with your connfig files":/config sj0erd/voicemailapp:google
+- docker run --name voicemailapp -d --restart unless-stopped -v "map directory with your config files":/config sj0erd/voicemailapp:google
 
 
 # main_script_v2.py
