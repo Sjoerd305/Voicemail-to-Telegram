@@ -9,6 +9,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 config = configparser.ConfigParser()
 config.read('/config/config.ini')
 config.read('/config/phone_numbers.ini')
+INFO_FILE = '/config/info.txt'
 
 # Set up logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -84,9 +85,9 @@ def avics(update: Update, context: CallbackContext) -> None:
 
 def info(update: Update, context: CallbackContext):
     if update.message.chat.type == "group":
-        with open("/config/info.txt", "r") as file:
+        with open(INFO_FILE, "r") as file:
             info = file.read()
-        update.message.reply_text(f"Beschikbare commando's: \n \n{info}")
+        update.message.reply_text(info)
 
 # Function to handle other messages
 def handle_other_messages(update: Update, context: CallbackContext) -> None:
