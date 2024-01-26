@@ -17,7 +17,7 @@ IMAP_SERVER = config['secrets']['IMAPSERVER']
 IMAP_PORT = config['secrets']['IMAPPORT']
 EMAIL = config['secrets']['EMAIL']
 PASSWORD = config['secrets']['PASSWORD']
-MAX_CAPTION_LENGTH = 600
+MAX_CAPTION_LENGTH = 1024
 TELEGRAM_TOKEN = config['secrets']['TELEGRAMTOKEN']
 CHAT_ID = config['secrets']['CHATID']
 
