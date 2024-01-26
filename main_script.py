@@ -25,6 +25,17 @@ CHAT_ID = config['secrets']['CHATID']
 credentials = service_account.Credentials.from_service_account_file('googlekey.json')
 client = speech.SpeechClient(credentials=credentials)
 
+def split_text(text, max_length):
+    """Splits a text into parts where each part is at most `max_length` characters."""
+    parts = []
+    while text:
+        # Take the first `max_length` characters from the text
+        part = text[:max_length]
+        parts.append(part)
+        # Remove the part we just added from the text
+        text = text[max_length:]
+    return parts
+
 async def convert_speech_to_text_inline(audio_content):
 
     language_code = "nl-NL"
@@ -67,11 +78,21 @@ async def process_and_combine_segments(segments):
 
     return combined_transcription.strip()  # Remove trailing space
 
-async def send_telegram_message_async(text, audio_path):
+async def send_telegram_message_async(texts, audio_path):
+    """
+    Send Telegram messages with an audio file. If a single message exceeds the maximum caption length,
+    split it into multiple parts and send each part as a separate message with the audio attached.
+    """
     try:
         bot = Bot(token=TELEGRAM_TOKEN)
-        with open(audio_path, 'rb') as audio_file:
-            await bot.send_voice(chat_id=CHAT_ID, voice=audio_file, caption=text, parse_mode="Markdown")
+        for text in texts:
+            # Split long text into multiple parts
+            text_parts = split_text(text, MAX_CAPTION_LENGTH - 20)  # Leave room for "Part x/y: " prefix
+            for i, part in enumerate(text_parts, start=1):
+                caption = f"Part {i}/{len(text_parts)}: " + part
+                # Re-open the audio file for each message part
+                with open(audio_path, 'rb') as audio_file:
+                    bot.send_voice(chat_id=CHAT_ID, voice=audio_file, caption=caption, parse_mode="Markdown")
     except TelegramError as e:
         print("TelegramError:", e)
 
@@ -110,13 +131,13 @@ async def main_async():
                             
                             # Check if combined_text is too long
                             if len(combined_text) > MAX_CAPTION_LENGTH:
-                                combined_text = "Transcription too long, cannot display."
+                                text_parts = split_text(combined_text, MAX_CAPTION_LENGTH)
+                            else:
+                                text_parts = [combined_text]
 
-                            telegram_message = f"Subject: {subject}\nEmail Text: {email_text}\nTranscription: {combined_text}"
-                            await send_telegram_message_async(telegram_message, file_path)
-
+                            telegram_message = f"Subject: {subject}\nEmail Text: {email_text}\nTranscription: "
+                            await send_telegram_message_async([telegram_message + part for part in text_parts], file_path)
                     mail.store(email_id, "+FLAGS", "\\Seen")
-
             else:
                 if os.path.exists("audio.wav"):
                     os.remove("audio.wav")
@@ -127,4 +148,5 @@ async def main_async():
         await asyncio.sleep(60)
 
 if __name__ == "__main__":
+
     asyncio.run(main_async())
