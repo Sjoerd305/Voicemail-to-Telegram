@@ -25,9 +25,6 @@ Redefined main script, does not use Google Cloud Speech to Text API, instead it 
 Pro's
 - Transcribes audio files on local machine, no cloud needed
 - Better transcriptions
-- Main script is revised
-- Support for longer audio files
-- Support for longer transcriptions and multiple telegram messages
 - No fees
 
 Cons
