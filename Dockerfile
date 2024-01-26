@@ -1,8 +1,7 @@
 FROM python:3.11
 #Dependencies for Voicemail app
-RUN apt-get update && apt-get install -y ffmpeg && apt-get clean 
+RUN apt-get update && apt-get install -y ffmpeg && apt-get clean
 RUN pip install google-cloud-speech pydub schedule paramiko requests
-RUN apt-get update --fix-missing
 RUN python -m pip install --user python-telegram-bot==12.8
 
 #Google Cloud dependencies
@@ -16,7 +15,5 @@ ENV TZ="Europe/Amsterdam"
 
 #Activate Google Cloud API
 RUN gcloud auth activate-service-account voicemail-app@voicemail-396410.iam.gserviceaccount.com --key-file=googlekey.json --project=voicemail-396410
-
-RUN apt update && apt upgrade -y
 
 CMD ["bash", "main.sh"]
