@@ -7,9 +7,9 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 
 # Read configuration
 config = configparser.ConfigParser()
-config.read('/config/config.ini')
-config.read('/config/phone_numbers.ini')
-INFO_FILE = '/config/info.txt'
+config.read('G:\\Mijn Drive\\VSCode\\Voicemail-to-Telegram-git\\config\\config.ini')
+config.read('G:\\Mijn Drive\\VSCode\\Voicemail-to-Telegram-git\\config\\phone_numbers.ini')
+INFO_FILE = 'G:\\Mijn Drive\\VSCode\\Voicemail-to-Telegram-git\\config\\info.txt'
 
 # Set up logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -71,16 +71,23 @@ def delete_vm(update: Update, context: CallbackContext) -> None:
                             "Probleem bij verwijderen voicemail.",
                             chat_id, context.bot)
 
-
+@run_async
 def vivia(update: Update, context: CallbackContext) -> None:
     if update.message.chat.type == "group":
         chat_id = update.message.chat_id
-        execute_ssh_command("/var/lib/misc/vivia/vivia.sh")
-
+        execute_ssh_command("/var/lib/misc/vivia/vivia.sh",
+                            "Storingsdienst naar Vivia",
+                            "Probleem bij omzetten storingsdienst",
+                            chat_id, context.bot)
+        
+@run_async
 def avics(update: Update, context: CallbackContext) -> None:
     if update.message.chat.type == "group":
         chat_id = update.message.chat_id
-        execute_ssh_command("/var/lib/misc/avics/avics.sh")
+        execute_ssh_command("/var/lib/misc/avics/avics.sh",
+                            "Storingsdienst naar Avics",
+                            "Probleem bij omzetten storingsdienst",
+                            chat_id, context.bot)
 
 
 def info(update: Update, context: CallbackContext):
