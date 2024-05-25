@@ -7,12 +7,12 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 
 # Read configuration
 config = configparser.ConfigParser()
-config.read('G:\\Mijn Drive\\VSCode\\Voicemail-to-Telegram-git\\config\\config.ini')
-config.read('G:\\Mijn Drive\\VSCode\\Voicemail-to-Telegram-git\\config\\phone_numbers.ini')
-INFO_FILE = 'G:\\Mijn Drive\\VSCode\\Voicemail-to-Telegram-git\\config\\info.txt'
+config.read('/config/config.ini')
+config.read('/config/phone_numbers.ini')
+INFO_FILE = '/config/info.txt'
 
 # Set up logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Extract configuration values

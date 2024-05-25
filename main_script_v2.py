@@ -3,21 +3,21 @@ import imaplib
 import email
 import os
 import configparser
+import whisper
 import logging
 from telegram import Bot, TelegramError
-import whisper
 
-# Set up logging
-logging.basicConfig(
-    filename='G:\Mijn Drive\VSCode\Voicemail-to-Telegram-git\debug.log', 
+logging.basicConfig( 
     level=logging.DEBUG, 
-    format='%(asctime)s %(levelname)s:%(message)s'
+    format='%(asctime)s %(levelname)s:%(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]    
 )
 
-# Read configuration
 config = configparser.ConfigParser()
-config.read('G:\Mijn Drive\VSCode\Voicemail-to-Telegram-git\config\config.ini')
-model = whisper.load_model("small")  # Define OpenAI Whisper model to be used, options: base, small, medium, large
+config.read('G:\\Mijn Drive\\VSCode\\Voicemail-to-Telegram-git\\config\\config.ini')
+model = whisper.load_model("base")  # Options: base, small, medium, large
 
 IMAP_SERVER = config['secrets']['IMAPSERVER']
 IMAP_PORT = config['secrets']['IMAPPORT']
@@ -25,7 +25,6 @@ EMAIL = config['secrets']['EMAIL']
 PASSWORD = config['secrets']['PASSWORD']
 TELEGRAM_TOKEN = config['secrets']['TELEGRAMTOKEN']
 CHAT_ID = config['secrets']['CHATID']
-
 
 async def send_voice_message(bot, chat_id, audio_path, caption):
     """Sends a voice message in smaller parts with captions."""
@@ -40,7 +39,6 @@ async def send_voice_message(bot, chat_id, audio_path, caption):
             logging.error(f"TelegramError on part {index+1}: {e}")
         except Exception as e:
             logging.error(f"General Error on part {index+1}: {e}")
-
 
 def convert_speech_to_text(audio_path):
     """Converts speech in an audio file to text using Whisper."""
@@ -107,7 +105,7 @@ async def main_async():
     bot = Bot(token=TELEGRAM_TOKEN)
     while True:
         await check_emails(bot)
-        await asyncio.sleep(30)  # Adjust the interval as needed
+        await asyncio.sleep(30)
 
 if __name__ == "__main__":
     logging.debug("Starting the main async loop.")
