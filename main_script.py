@@ -5,11 +5,12 @@ import os
 import configparser
 import telegram
 from telegram import Bot
-from telegram.error import TelegramError
+from telegram.error import TelegramError, NetworkError, RetryAfter
 from google.cloud import speech_v1p1beta1 as speech
 from google.oauth2 import service_account
 from pydub import AudioSegment
 import logging
+import time
 
 logging.basicConfig(
     level=logging.ERROR,
@@ -23,7 +24,7 @@ config = configparser.ConfigParser()
 config.read('/config/config.ini')
 
 IMAP_SERVER = config['secrets']['IMAPSERVER']
-IMAP_PORT = config['secrets']['IMAPPORT']
+IMAP_PORT = int(config['secrets']['IMAPPORT'])
 EMAIL = config['secrets']['EMAIL']
 PASSWORD = config['secrets']['PASSWORD']
 TELEGRAM_TOKEN = config['secrets']['TELEGRAMTOKEN']
@@ -34,13 +35,10 @@ credentials = service_account.Credentials.from_service_account_file('googlekey.j
 client = speech.SpeechClient(credentials=credentials)
 
 def split_text(text, max_length):
-    """Splits a text into parts where each part is at most `max_length` characters."""
     parts = []
     while text:
-        # Take the first `max_length` characters from the text
         part = text[:max_length]
         parts.append(part)
-        # Remove the part we just added from the text
         text = text[max_length:]
     return parts
 
@@ -111,11 +109,25 @@ async def send_telegram_message_async(texts, audio_path):
             text_parts = split_text(text, 1024 - 20)  # Leave room for "Part x/y: " prefix
             for i, part in enumerate(text_parts, start=1):
                 caption = f"Part {i}/{len(text_parts)}: " + part
-                # Re-open the audio file for each message part
-                with open(audio_path, 'rb') as audio_file:
-                    bot.send_voice(chat_id=CHAT_ID, voice=audio_file, caption=caption, parse_mode="Markdown")
-    except TelegramError as e:
-        logging.error(f"TelegramError: {e}")
+                retry = True
+                while retry:
+                    try:
+                        # Re-open the audio file for each message part
+                        with open(audio_path, 'rb') as audio_file:
+                            bot.send_voice(chat_id=CHAT_ID, voice=audio_file, caption=caption, parse_mode="Markdown")
+                        retry = False
+                    except NetworkError as e:
+                        logging.error(f"NetworkError: {e}, retrying in 5 seconds...")
+                        await asyncio.sleep(5)
+                    except RetryAfter as e:
+                        logging.error(f"Rate limited by Telegram, retrying after {e.retry_after} seconds...")
+                        await asyncio.sleep(e.retry_after)
+                    except TelegramError as e:
+                        logging.error(f"TelegramError: {e}")
+                        retry = False
+                    except Exception as e:
+                        logging.error(f"Error in send_telegram_message_async: {e}")
+                        retry = False
     except Exception as e:
         logging.error(f"Error in send_telegram_message_async: {e}")
 
