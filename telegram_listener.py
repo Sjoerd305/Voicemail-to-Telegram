@@ -4,6 +4,7 @@ import configparser
 import requests
 from telegram import Update, Bot
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, run_async
+from telegram.eror import NetworkError
 
 # Read configuration
 config = configparser.ConfigParser()
@@ -143,8 +144,10 @@ def main() -> None:
         # Start listening for updates
         updater.start_polling()
         updater.idle()
+    except NetworkError as e:
+        logging.error("Network error occurred: %s", e)
     except Exception as e:
-        logging.critical("Unhandled exception in main: %s", e)
+        logging.error("Unhandled exception in main: %s", e)
         raise
 
 if __name__ == '__main__':
