@@ -5,7 +5,7 @@ Retrieves emails using IMAP, extracts the text and voicemail message. Parses the
 
 ## Dependencies 
 - pip install google-cloud-speech pydub schedule paramiko
-- pip install --user python-telegram-bot==12.8
+- pip install --user python-telegram-bot==21.3
 - apt install ffmpeg
 
 ## Google Cloud SDK
