@@ -8,7 +8,7 @@ RUN python -m pip install --user python-telegram-bot==12.8
 RUN apt-get install -y apt-transport-https ca-certificates gnupg curl sudo
 RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && apt-get install google-cloud-cli -y
 
-COPY main_script.py /config/googlekey.json main.sh telegram_listener.py emailcleanup.py .
+COPY main.py /config/googlekey.json main.sh telegram_listener.py emailcleanup.py .
 
 #Enviroment
 ENV TZ="Europe/Amsterdam"

@@ -17,7 +17,8 @@ logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler()
+        logging.StreamHandler(),
+        logging.FileHandlers("VMnotifier.log")
     ]
 )
 
@@ -175,7 +176,7 @@ async def main_async():
                                 else:
                                     text_parts = [combined_text]
 
-                                telegram_message = f"Subject: {subject}\nEmail Text: {email_text}\nTranscription: "
+                                telegram_message = f"Subject: {subject}\nEmail Text: {email_text}\n\nTranscription: "
                                 await send_telegram_message_async([telegram_message + part for part in text_parts], file_path)
                         mail.store(email_id, "+FLAGS", "\\Seen")
                     except Exception as e:
