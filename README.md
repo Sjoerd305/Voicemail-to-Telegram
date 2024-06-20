@@ -16,17 +16,3 @@ Retrieves emails using IMAP, extracts the text and voicemail message. Parses the
 
 - Dockerfile
 - docker run --name voicemailapp -d --restart unless-stopped -v "map directory with your config files":/config sj0erd/voicemailapp:google
-
-
-# main_script_v2.py
-
-Redefined main script, does not use Google Cloud Speech to Text API, instead it uses OpenAI Whisper module in python. Does require a minimum of 6GB of RAM and fast processor to transcribe the messages to Telegram. Transcribing messages using Whisper take longer but quality is better that Google Speech to Text API, currently testing on whsiper model medium. The large model is seems to be a bit better fot the dutch language, but processing times are too long for actual use. 
-
-Pro's
-- Transcribes audio files on local machine, no cloud needed
-- Better transcriptions
-- No fees
-
-Cons
-- Slower
-- Needs a heavier machine
