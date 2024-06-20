@@ -12,13 +12,17 @@ from pydub import AudioSegment
 from pathlib import Path
 import logging
 import time
+import nest_asyncio
+
+# Apply the nest_asyncio patch
+nest_asyncio.apply()
 
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandlers("VMnotifier.log")
+        logging.FileHandler("VMnotifier.log")
     ]
 )
 
@@ -119,7 +123,7 @@ async def send_telegram_message_async(texts, audio_path):
                     try:
                         # Re-open the audio file for each message part
                         with open(audio_path, 'rb') as audio_file:
-                            bot.send_voice(chat_id=CHAT_ID, voice=audio_file, caption=caption, parse_mode="Markdown")
+                            await bot.send_voice(chat_id=CHAT_ID, voice=audio_file, caption=caption, parse_mode="Markdown")
                         retry = False
                     except NetworkError as e:
                         logging.error(f"NetworkError: {e}, retrying in 5 seconds...")
@@ -192,4 +196,8 @@ async def main_async():
 
 if __name__ == "__main__":
     logging.info("Starting main_async loop.")
-    asyncio.run(main_async())
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        loop.create_task(main_async())
+    else:
+        asyncio.run(main_async())
