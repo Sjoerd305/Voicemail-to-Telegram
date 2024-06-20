@@ -4,9 +4,13 @@ import imaplib
 import email
 import configparser
 from datetime import datetime
+from pathlib import Path
 
+
+config_dir = Path(__file__).resolve().parent / 'config'
+config_file = config_dir / 'config.ini'
 config = configparser.ConfigParser()
-config.read('/config/config.ini')
+config.read(config_file)
 
 # Configuration for the email account and IMAP server
 imap_host = config['secrets']['IMAPSERVER']

@@ -9,6 +9,7 @@ from telegram.error import TelegramError, NetworkError, RetryAfter
 from google.cloud import speech_v1p1beta1 as speech
 from google.oauth2 import service_account
 from pydub import AudioSegment
+from pathlib import Path
 import logging
 import time
 
@@ -20,8 +21,11 @@ logging.basicConfig(
     ]
 )
 
+config_dir = Path(__file__).resolve().parent / 'config'
+config_file = config_dir / 'config.ini'
+googlekey = config_dir / 'googlekey.json'
 config = configparser.ConfigParser()
-config.read('/config/config.ini')
+config.read(config_file)
 
 IMAP_SERVER = config['secrets']['IMAPSERVER']
 IMAP_PORT = int(config['secrets']['IMAPPORT'])
@@ -31,7 +35,7 @@ TELEGRAM_TOKEN = config['secrets']['TELEGRAMTOKEN']
 CHAT_ID = config['secrets']['CHATID']
 
 # Google API
-credentials = service_account.Credentials.from_service_account_file('googlekey.json')
+credentials = service_account.Credentials.from_service_account_file(googlekey)
 client = speech.SpeechClient(credentials=credentials)
 
 def split_text(text, max_length):

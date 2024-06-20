@@ -1,9 +1,5 @@
-config.ini
-googlekey.json
-sdomzetten.py
-avics-serviceaccount.json
-credentials.json
-token.json
-telegram_listener.old
-phone_numbers.ini
-info.txt
+*.txt
+*.ini
+*.old
+*.json
+*.py

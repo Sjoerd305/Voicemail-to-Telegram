@@ -4,20 +4,32 @@ import configparser
 import requests
 from telegram import Update, Bot
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, run_async
-from telegram.eror import NetworkError
+from pathlib import Path
+import json
+
+# Define the configuration file paths
+config_dir = Path(__file__).resolve().parent / 'config'
+config_file = config_dir / 'config.ini'
+phone_numbers_file = config_dir / 'phone_numbers.ini'
+info_file = config_dir / 'info.txt'
+customers_file = config_dir / 'customers.json'
+
+# Check if configuration files exist
+if not config_file.is_file() or not phone_numbers_file.is_file() or not info_file.is_file() or not customers_file.is_file():
+    raise FileNotFoundError("One or more configuration files are missing.")
 
 # Read configuration
 config = configparser.ConfigParser()
-config.read('/config/config.ini')
-config.read('/config/phone_numbers.ini')
-INFO_FILE = '/config/info.txt'
+config.read(config_file)
+config.read(phone_numbers_file)
 
 # Set up logging
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler()
+        logging.StreamHandler(),
+        logging.FileHandler("listener.log")
     ]
 )
 
@@ -44,7 +56,6 @@ def set_storingsdienst(name: str, phone_number: str, update: Update, context: Ca
         update.message.reply_text("Er is een fout opgetreden.")
         logging.error("Exception while setting storingsdienst for %s: %s", name, e)
 
-# Function to handle storingsdienst commands
 def handle_storingsdienst_command(update: Update, context: CallbackContext) -> None:
     try:
         command = update.message.text[1:].split('@')[0]  # Extract the command name
@@ -66,7 +77,7 @@ def execute_ssh_command(command: str, success_message: str, error_message: str, 
 
     try:
         ssh_client.connect(config['secrets']['SSH_HOST'], 
-                           config['secrets']['SSH_PORT'], 
+                           int(config['secrets']['SSH_PORT']), 
                            config['secrets']['SSH_USERNAME'], 
                            config['secrets']['SSH_PASSWORD'])
 
@@ -113,14 +124,31 @@ def avics(update: Update, context: CallbackContext) -> None:
 def info(update: Update, context: CallbackContext):
     if update.message.chat.type == "group":
         try:
-            with open(INFO_FILE, "r") as file:
+            with open(info_file, "r") as file:
                 info = file.read()
             update.message.reply_text(info)
         except Exception as e:
             update.message.reply_text("Er is een fout opgetreden bij het ophalen van de informatie.")
             logging.error("Error reading info file: %s", e)
 
-# Function to handle other messages
+def handle_customer_command(update: Update, context: CallbackContext) -> None:
+    command = update.message.text[1:].lower()  # Extract the command name
+    # Load customer information dynamically from JSON file
+    with open(customers_file, 'r') as file:
+        CUSTOMERS = json.load(file)
+    customer_info = CUSTOMERS.get(command)
+    if customer_info:
+        formatted_message = customer_info.replace('\n', '\n')
+        update.message.reply_text(formatted_message)
+    else:
+        update.message.reply_text("Onbekend commando, zie /info of /klant")
+        logging.warning("Unknown customer command received: %s", command)
+
+def lol(update: Update, context: CallbackContext) -> None:
+    if update.message.chat.type == "group":
+        chat_id = update.message.chat_id
+        context.bot.send_message(chat_id=chat_id, text="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
 def handle_other_messages(update: Update, context: CallbackContext) -> None:
     pass
 
@@ -137,6 +165,10 @@ def main() -> None:
         dispatcher.add_handler(CommandHandler("avics", avics))
         dispatcher.add_handler(CommandHandler(list(PHONE_NUMBERS.keys()), handle_storingsdienst_command))
         dispatcher.add_handler(CommandHandler("info", info))
+        dispatcher.add_handler(CommandHandler("lol", lol))
+
+        # Register a generic handler for all customer commands
+        dispatcher.add_handler(MessageHandler(Filters.command, handle_customer_command))
 
         # Register a message handler for all other text messages in the group chat
         dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_other_messages))
@@ -144,8 +176,7 @@ def main() -> None:
         # Start listening for updates
         updater.start_polling()
         updater.idle()
-    except NetworkError as e:
-        logging.error("Network error occurred: %s", e)
+
     except Exception as e:
         logging.error("Unhandled exception in main: %s", e)
         raise
