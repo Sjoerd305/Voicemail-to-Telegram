@@ -32,5 +32,7 @@ RUN chmod +x main.sh
 # Activate Google Cloud API
 RUN gcloud auth activate-service-account voicemail-app@voicemail-396410.iam.gserviceaccount.com --key-file=googlekey.json --project=voicemail-396410
 
+RUN rm googlekey.json
+
 # Start the application
 CMD ["bash", "main.sh"]
