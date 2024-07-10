@@ -17,12 +17,18 @@ import nest_asyncio
 # Apply the nest_asyncio patch
 nest_asyncio.apply()
 
+# Set up logging directory and file
+log_dir = Path(__file__).resolve().parent / 'logs'
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / 'voicemail_notifier.log'
+
+# Set up logging
 logging.basicConfig(
     level=logging.ERROR,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("VMnotifier.log")
+        logging.FileHandler(log_file)
     ]
 )
 

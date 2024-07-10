@@ -12,6 +12,21 @@ import nest_asyncio
 # Apply the nest_asyncio patch
 nest_asyncio.apply()
 
+# Set up logging directory and file
+log_dir = Path(__file__).resolve().parent / 'logs'
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / 'telegram_listener.log'
+
+# Set up logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file)
+    ]
+)
+
 # Define the configuration file paths
 config_dir = Path(__file__).resolve().parent / 'config'
 config_file = config_dir / 'config.ini'
@@ -27,16 +42,6 @@ if not config_file.is_file() or not phone_numbers_file.is_file() or not info_fil
 config = configparser.ConfigParser()
 config.read(config_file)
 config.read(phone_numbers_file)
-
-# Set up logging
-logging.basicConfig(
-    level=logging.ERROR,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("Listener.log")
-    ]
-)
 
 # Extract configuration values
 try:
@@ -75,29 +80,35 @@ async def handle_storingsdienst_command(update: Update, context: ContextTypes.DE
         await update.message.reply_text("Er is een fout opgetreden bij het verwerken van het commando.")
         logging.error("Error handling storingsdienst command: %s", e)
 
-async def execute_ssh_command(command: str, success_message: str, error_message: str, chat_id: int, bot: Bot) -> None:
+async def execute_ssh_command(command: str, success_message: str, error_message: str, chat_id: int, bot: Bot, retries: int = 3) -> None:
     ssh_client = paramiko.SSHClient()
     ssh_client.load_system_host_keys()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    try:
-        ssh_client.connect(config['secrets']['SSH_HOST'], 
-                           int(config['secrets']['SSH_PORT']), 
-                           config['secrets']['SSH_USERNAME'], 
-                           config['secrets']['SSH_PASSWORD'])
+    for attempt in range(1, retries + 1):
+        try:
+            logging.info("Attempting to execute SSH command (Attempt %d/%d): %s", attempt, retries, command)
+            ssh_client.connect(config['secrets']['SSH_HOST'], 
+                               int(config['secrets']['SSH_PORT']), 
+                               config['secrets']['SSH_USERNAME'], 
+                               config['secrets']['SSH_PASSWORD'])
 
-        stdin, stdout, stderr = ssh_client.exec_command(command)
-        error_output = stderr.read()
-        if error_output:
-            await bot.send_message(chat_id=chat_id, text=error_message)
-            logging.error("SSH command error: %s", error_output)
-        else:
-            await bot.send_message(chat_id=chat_id, text=success_message)
-    except Exception as e:
-        await bot.send_message(chat_id=chat_id, text=f"Error: {str(e)}")
-        logging.error("Exception during SSH command execution: %s", e)
-    finally:
-        ssh_client.close()
+            stdin, stdout, stderr = ssh_client.exec_command(command)
+            error_output = stderr.read()
+            if error_output:
+                logging.error("SSH command error on attempt %d: %s", attempt, error_output)
+                if attempt == retries:
+                    await bot.send_message(chat_id=chat_id, text=error_message)
+            else:
+                logging.info("SSH command executed successfully on attempt %d", attempt)
+                await bot.send_message(chat_id=chat_id, text=success_message)
+                break
+        except Exception as e:
+            logging.error("Exception during SSH command execution on attempt %d: %s", attempt, e)
+            if attempt == retries:
+                await bot.send_message(chat_id=chat_id, text=f"Error: {str(e)}")
+        finally:
+            ssh_client.close()
 
 async def delete_vm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message.chat.type == "group":
@@ -105,7 +116,7 @@ async def delete_vm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await execute_ssh_command("rm -f /var/spool/asterisk/voicemail/default/9001/INBOX/*.*",
                                   "Voicemail verwijderd.",
                                   "Probleem bij verwijderen voicemail.",
-                                  chat_id, context.bot)
+                                  chat_id, context.bot, retries=3)
 
 async def vivia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message.chat.type == "group":
@@ -113,7 +124,7 @@ async def vivia(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await execute_ssh_command("/var/lib/misc/vivia/vivia.sh",
                                   "Storingsdienst naar Vivia",
                                   "Probleem bij omzetten storingsdienst",
-                                  chat_id, context.bot)
+                                  chat_id, context.bot, retries=3)
 
 async def avics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.message.chat.type == "group":
@@ -121,7 +132,7 @@ async def avics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await execute_ssh_command("/var/lib/misc/avics/avics.sh",
                                   "Storingsdienst naar Avics",
                                   "Probleem bij omzetten storingsdienst",
-                                  chat_id, context.bot)
+                                  chat_id, context.bot, retries=3)
 
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == "group":
