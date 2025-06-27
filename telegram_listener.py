@@ -94,9 +94,16 @@ async def execute_ssh_command(command: str, success_message: str, error_message:
                                config['secrets']['SSH_PASSWORD'])
 
             stdin, stdout, stderr = ssh_client.exec_command(command)
+            # Wait for the command to complete
+            exit_status = stdout.channel.recv_exit_status()
+            
             error_output = stderr.read()
             if error_output:
                 logging.error("SSH command error on attempt %d: %s", attempt, error_output)
+                if attempt == retries:
+                    await bot.send_message(chat_id=chat_id, text=error_message)
+            elif exit_status != 0:
+                logging.error("SSH command failed with exit status %d on attempt %d", exit_status, attempt)
                 if attempt == retries:
                     await bot.send_message(chat_id=chat_id, text=error_message)
             else:

@@ -13,6 +13,7 @@ from pathlib import Path
 import logging
 import time
 import nest_asyncio
+import random
 
 # Apply the nest_asyncio patch
 nest_asyncio.apply()
@@ -24,7 +25,7 @@ log_file = log_dir / 'voicemail_notifier.log'
 
 # Set up logging
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -125,15 +126,18 @@ async def send_telegram_message_async(texts, audio_path):
             for i, part in enumerate(text_parts, start=1):
                 caption = f"Part {i}/{len(text_parts)}: " + part
                 retry = True
-                while retry:
+                attempt = 0
+                while retry and attempt < 5:
                     try:
                         # Re-open the audio file for each message part
                         with open(audio_path, 'rb') as audio_file:
                             await bot.send_voice(chat_id=CHAT_ID, voice=audio_file, caption=caption, parse_mode="Markdown")
                         retry = False
                     except NetworkError as e:
-                        logging.error(f"NetworkError: {e}, retrying in 5 seconds...")
-                        await asyncio.sleep(5)
+                        attempt += 1
+                        wait_time = min(60, 2 ** attempt + random.random() * attempt)
+                        logging.error(f"NetworkError: {e}, retrying in {wait_time} seconds... (Attempt {attempt}/5)")
+                        await asyncio.sleep(wait_time)
                     except RetryAfter as e:
                         logging.error(f"Rate limited by Telegram, retrying after {e.retry_after} seconds...")
                         await asyncio.sleep(e.retry_after)
@@ -195,9 +199,13 @@ async def main_async():
                 if os.path.exists("audio.wav"):
                     os.remove("audio.wav")
 
+        except imaplib.IMAP4.abort as e:
+            logging.error(f"IMAP connection error: {e}")
+        except imaplib.IMAP4.error as e:
+            logging.error(f"IMAP error: {e}")
         except Exception as e:
             logging.error(f"Error in main_async loop: {e}")
-
+        
         await asyncio.sleep(10)
 
 if __name__ == "__main__":
