@@ -8,6 +8,8 @@ from pathlib import Path
 import json
 import asyncio
 import nest_asyncio
+import select
+import time
 
 # Apply the nest_asyncio patch
 nest_asyncio.apply()
@@ -93,27 +95,37 @@ async def execute_ssh_command(command: str, success_message: str, error_message:
                                config['secrets']['SSH_USERNAME'], 
                                config['secrets']['SSH_PASSWORD'])
 
-            stdin, stdout, stderr = ssh_client.exec_command(command)
-            # Wait for the command to complete
+            # Set a timeout for the command execution
+            stdin, stdout, stderr = ssh_client.exec_command(command, timeout=60)
+            
+            logging.info("Command started, waiting for completion...")
+            
+            # Wait for the command to complete with timeout
             exit_status = stdout.channel.recv_exit_status()
             
-            error_output = stderr.read()
-            if error_output:
-                logging.error("SSH command error on attempt %d: %s", attempt, error_output)
-                if attempt == retries:
-                    await bot.send_message(chat_id=chat_id, text=error_message)
-            elif exit_status != 0:
-                logging.error("SSH command failed with exit status %d on attempt %d", exit_status, attempt)
-                if attempt == retries:
-                    await bot.send_message(chat_id=chat_id, text=error_message)
-            else:
+            logging.info("Command completed with exit status: %d", exit_status)
+            
+            # If exit status is 0, immediately send success message
+            if exit_status == 0:
                 logging.info("SSH command executed successfully on attempt %d", attempt)
+                logging.info("Sending success message to chat %d", chat_id)
                 await bot.send_message(chat_id=chat_id, text=success_message)
+                logging.info("Success message sent successfully")
                 break
+            else:
+                # Only read stderr if there was an error
+                error_output = stderr.read()
+                logging.error("SSH command failed with exit status %d on attempt %d: %s", exit_status, attempt, error_output)
+                if attempt == retries:
+                    logging.info("Sending error message to chat %d", chat_id)
+                    await bot.send_message(chat_id=chat_id, text=error_message)
+                    
         except Exception as e:
-            logging.error("Exception during SSH command execution on attempt %d: %s", attempt, e)
+            logging.error("Exception during SSH command execution on attempt %d: %s", attempt, str(e))
+            logging.error("Exception type: %s", type(e).__name__)
             if attempt == retries:
-                await bot.send_message(chat_id=chat_id, text=f"Error: {str(e)}")
+                logging.info("Sending exception message to chat %d", chat_id)
+                await bot.send_message(chat_id=chat_id, text=f"Error: {type(e).__name__}: {str(e)}")
         finally:
             ssh_client.close()
 
