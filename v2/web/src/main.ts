@@ -290,6 +290,18 @@ function highlight(target: HTMLElement, text: string, query: string): void {
   target.append(text.slice(pos));
 }
 
+// Audio objects live outside the render: renderVoicemails() rebuilds every
+// card (auto-refresh, search, filters), and a per-card Audio in a closure
+// would keep playing while its seek bar and play button are replaced by
+// fresh, disconnected ones. Each entry's listeners update `ui`, which
+// buildPlayer repoints at the newest card's elements.
+interface PlayerUI {
+  play: HTMLButtonElement;
+  seek: HTMLInputElement;
+  time: HTMLElement;
+}
+const players = new Map<number, { audio: HTMLAudioElement; ui: PlayerUI }>();
+
 function buildPlayer(vm: Voicemail): HTMLElement {
   const wrap = el('div', 'player');
   const play = document.createElement('button');
@@ -310,26 +322,42 @@ function buildPlayer(vm: Voicemail): HTMLElement {
   dl.title = 'Download';
   dl.append(icon(Download, 15));
 
-  let audio: HTMLAudioElement | null = null;
-  const ensureAudio = (): HTMLAudioElement => {
-    if (audio) return audio;
-    audio = new Audio(`/api/voicemails/${vm.id}/audio`);
+  const ui: PlayerUI = { play, seek, time };
+
+  const ensurePlayer = (): { audio: HTMLAudioElement; ui: PlayerUI } => {
+    const existing = players.get(vm.id);
+    if (existing) return existing;
+    const audio = new Audio(`/api/voicemails/${vm.id}/audio`);
     audio.preload = 'metadata';
+    const entry = { audio, ui };
     audio.addEventListener('loadedmetadata', () => {
-      time.textContent = `0:00 / ${fmtClock(audio!.duration)}`;
+      entry.ui.time.textContent = `${fmtClock(audio.currentTime)} / ${fmtClock(audio.duration)}`;
     });
     audio.addEventListener('timeupdate', () => {
-      if (audio!.duration > 0) seek.value = String((audio!.currentTime / audio!.duration) * 100);
-      time.textContent = `${fmtClock(audio!.currentTime)} / ${fmtClock(audio!.duration)}`;
+      if (audio.duration > 0) entry.ui.seek.value = String((audio.currentTime / audio.duration) * 100);
+      entry.ui.time.textContent = `${fmtClock(audio.currentTime)} / ${fmtClock(audio.duration)}`;
     });
-    audio.addEventListener('ended', () => { play.replaceChildren(icon(Play, 15)); seek.value = '0'; });
-    audio.addEventListener('pause', () => { play.replaceChildren(icon(Play, 15)); });
-    audio.addEventListener('play', () => { play.replaceChildren(icon(Pause, 15)); });
-    return audio;
+    audio.addEventListener('ended', () => { entry.ui.play.replaceChildren(icon(Play, 15)); entry.ui.seek.value = '0'; });
+    audio.addEventListener('pause', () => { entry.ui.play.replaceChildren(icon(Play, 15)); });
+    audio.addEventListener('play', () => { entry.ui.play.replaceChildren(icon(Pause, 15)); });
+    players.set(vm.id, entry);
+    return entry;
   };
 
+  // Adopt an already-created audio into this fresh card and mirror its state.
+  const existing = players.get(vm.id);
+  if (existing) {
+    existing.ui = ui;
+    const a = existing.audio;
+    if (isFinite(a.duration) && a.duration > 0) {
+      seek.value = String((a.currentTime / a.duration) * 100);
+      time.textContent = `${fmtClock(a.currentTime)} / ${fmtClock(a.duration)}`;
+    }
+    if (!a.paused) play.replaceChildren(icon(Pause, 15));
+  }
+
   play.addEventListener('click', () => {
-    const a = ensureAudio();
+    const a = ensurePlayer().audio;
     if (a.paused) {
       if (currentAudio && currentAudio !== a) currentAudio.pause();
       currentAudio = a;
@@ -339,7 +367,7 @@ function buildPlayer(vm: Voicemail): HTMLElement {
     }
   });
   seek.addEventListener('input', () => {
-    const a = ensureAudio();
+    const a = ensurePlayer().audio;
     if (a.duration > 0) a.currentTime = (Number(seek.value) / 100) * a.duration;
   });
 
