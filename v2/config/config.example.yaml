@@ -17,12 +17,6 @@ transcription:
   enabled: true
   language: nl-NL
   google_credentials: /config/googlekey.json
-  # Speech-to-Text v2 recognizer. Chirp models are region-bound; chirp_3 is
-  # GA in the "eu" multi-region (the defaults below). Project defaults to the
-  # one in the credentials file.
-  # google_project: my-project-id
-  # location: eu
-  # model: chirp_3
   # Recommended. When set, ALL audio is routed through this bucket (objects
   # are deleted right after transcription; give the bucket a 1-day lifecycle
   # delete rule as a safety net). When empty, audio is sent inline, which

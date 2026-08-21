@@ -7,9 +7,8 @@ a small web dashboard.
 ## What it does
 
 - **Mail watcher** — polls the IMAP inbox for PBX voicemail mails, transcribes
-  the attached audio with Google Speech-to-Text v2 (Chirp 3, `eu` region by
-  default) and forwards the mail text + transcription + audio to the Telegram
-  group.
+  the attached audio with Google Speech-to-Text and forwards the mail text +
+  transcription + audio to the Telegram group.
 - **Telegram commands** — `/deletevm`, `/vivia`, `/avics`, storingsdienst
   switches per phone number, `/info`, customer lookups from `customers.json`
   and of course `/lol`. All commands are defined in `config.yaml` — nothing is
