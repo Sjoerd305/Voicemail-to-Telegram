@@ -56,7 +56,14 @@ func (s *Server) Handler() http.Handler {
 	if err != nil {
 		panic(err)
 	}
-	mux.Handle("GET /", http.FileServerFS(sub))
+	static := http.FileServerFS(sub)
+	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// no-cache = revalidate before reuse; keeps CDN/proxy edges (e.g.
+		// Cloudflare caches .js/.css by extension) from serving stale
+		// frontend builds after a deploy.
+		w.Header().Set("Cache-Control", "no-cache")
+		static.ServeHTTP(w, r)
+	}))
 
 	if s.cfg.Web.GoogleAuth.ClientID != "" {
 		return newGoogleAuth(s.cfg.Web).middleware(mux)
