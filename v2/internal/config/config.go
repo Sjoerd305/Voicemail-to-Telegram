@@ -112,7 +112,7 @@ type Config struct {
 }
 
 func Load(path string) (*Config, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- path comes from the -config flag set by the operator
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}

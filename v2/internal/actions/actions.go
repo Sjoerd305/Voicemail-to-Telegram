@@ -178,7 +178,7 @@ func (r *Runner) runSSH(ctx context.Context, command string) error {
 	cfg := &ssh.ClientConfig{
 		User:            r.cfg.SSH.Username,
 		Auth:            []ssh.AuthMethod{ssh.Password(r.cfg.SSH.Password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // same trust model as the old paramiko AutoAddPolicy
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // #nosec G106 -- same trust model as the old paramiko AutoAddPolicy; PBX host lives on the trusted LAN
 		Timeout:         10 * time.Second,
 	}
 	addr := net.JoinHostPort(r.cfg.SSH.Host, strconv.Itoa(r.cfg.SSH.Port))

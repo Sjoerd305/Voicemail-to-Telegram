@@ -46,7 +46,7 @@ func New(ctx context.Context, cfg config.Transcription) (*Transcriber, error) {
 	if cfg.GCSBucket != "" {
 		gcs, err := storage.NewClient(ctx, opts...)
 		if err != nil {
-			sc.Close()
+			_ = sc.Close()
 			return nil, fmt.Errorf("storage client: %w", err)
 		}
 		t.storage = gcs
@@ -56,10 +56,10 @@ func New(ctx context.Context, cfg config.Transcription) (*Transcriber, error) {
 
 func (t *Transcriber) Close() {
 	if t.speech != nil {
-		t.speech.Close()
+		_ = t.speech.Close()
 	}
 	if t.storage != nil {
-		t.storage.Close()
+		_ = t.storage.Close()
 	}
 }
 

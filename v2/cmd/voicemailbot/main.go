@@ -43,10 +43,10 @@ func run(configPath string) error {
 		return err
 	}
 
-	if err := os.MkdirAll(cfg.Storage.AudioDir, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.Storage.AudioDir, 0o750); err != nil {
 		return fmt.Errorf("create audio dir: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.Storage.Database), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cfg.Storage.Database), 0o750); err != nil {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
@@ -116,8 +116,9 @@ func run(configPath string) error {
 			slog.Warn("web auth: NONE — dashboard is accessible without login")
 		}
 		srv = &http.Server{
-			Addr:    cfg.Web.Listen,
-			Handler: web.NewServer(cfg, st, runner, watcher, tgBot).Handler(),
+			Addr:              cfg.Web.Listen,
+			Handler:           web.NewServer(cfg, st, runner, watcher, tgBot).Handler(),
+			ReadHeaderTimeout: 10 * time.Second,
 		}
 		go func() {
 			slog.Info("web server listening", "addr", cfg.Web.Listen)
@@ -133,23 +134,25 @@ func run(configPath string) error {
 	if srv != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("web server shutdown", "err", err)
+		}
 	}
 	return nil
 }
 
 func acquireLock(path string) (func(), error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) // #nosec G304 -- path derives from the operator's config file
 	if err != nil {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("another instance is already running (lock %s held)", path)
 	}
 	return func() {
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-		f.Close()
-		os.Remove(path)
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+		_ = os.Remove(path)
 	}, nil
 }

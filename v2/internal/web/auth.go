@@ -78,7 +78,7 @@ func (a *googleAuth) middleware(next http.Handler) http.Handler {
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 			return
 		}
 		a.serveLoginPage(w, r)
@@ -92,6 +92,7 @@ func (a *googleAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := hex.EncodeToString(buf)
+	// #nosec G124 -- HttpOnly and SameSite are set; Secure follows the public_url scheme (off for plain-http LAN setups).
 	http.SetCookie(w, &http.Cookie{
 		Name: stateCookie, Value: state, Path: "/",
 		MaxAge: 600, HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode,
@@ -195,6 +196,7 @@ func (a *googleAuth) sign(payload string) string {
 func (a *googleAuth) setSession(w http.ResponseWriter, email string) {
 	exp := time.Now().Add(sessionTTL)
 	value := a.sign(email + "|" + strconv.FormatInt(exp.Unix(), 10))
+	// #nosec G124 -- HttpOnly and SameSite are set; Secure follows the public_url scheme (off for plain-http LAN setups).
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: value, Path: "/",
 		Expires: exp, HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode,
@@ -202,6 +204,7 @@ func (a *googleAuth) setSession(w http.ResponseWriter, email string) {
 }
 
 func (a *googleAuth) clearSession(w http.ResponseWriter) {
+	// #nosec G124 -- HttpOnly and SameSite are set; Secure follows the public_url scheme (off for plain-http LAN setups).
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/",
 		MaxAge: -1, HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode,
@@ -292,5 +295,5 @@ p { color:var(--muted); font-size:.88rem; margin:0 0 1.5rem; }
 func (a *googleAuth) serveLoginPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	loginTmpl.Execute(w, struct{ Error string }{Error: r.URL.Query().Get("e")})
+	_ = loginTmpl.Execute(w, struct{ Error string }{Error: r.URL.Query().Get("e")})
 }

@@ -176,7 +176,7 @@ func (w *Watcher) processMessage(ctx context.Context, client *imapclient.Client,
 	if len(parsed.Audio) > 0 {
 		audioPath = filepath.Join(w.cfg.Storage.AudioDir,
 			fmt.Sprintf("%d.wav", time.Now().UnixNano()))
-		if err := os.WriteFile(audioPath, parsed.Audio, 0o644); err != nil {
+		if err := os.WriteFile(audioPath, parsed.Audio, 0o600); err != nil {
 			slog.Error("failed to store audio file", "err", err)
 			audioPath = ""
 		}

@@ -46,11 +46,11 @@ func main() {
 	defer st.Close()
 
 	audioPath := filepath.Join(dir, "sample.wav")
-	if err := os.WriteFile(audioPath, sampleWAV(23), 0o644); err != nil {
+	if err := os.WriteFile(audioPath, sampleWAV(23), 0o600); err != nil {
 		log.Fatal(err)
 	}
 
-	rng := rand.New(rand.NewSource(42))
+	rng := rand.New(rand.NewSource(42)) // #nosec G404 -- deterministic sample data, nothing security-sensitive
 	now := time.Now()
 	n := 0
 	for day := 13; day >= 0; day-- {
@@ -113,7 +113,12 @@ func main() {
 	mux.Handle("/", srv.Handler())
 
 	fmt.Println("preview on http://127.0.0.1:8099 with", n, "sample voicemails")
-	log.Fatal(http.ListenAndServe("127.0.0.1:8099", mux))
+	previewSrv := &http.Server{
+		Addr:              "127.0.0.1:8099",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	log.Fatal(previewSrv.ListenAndServe())
 }
 
 // sampleWAV generates a wobbling tone, seconds long, 8kHz 16-bit mono.
@@ -122,7 +127,7 @@ func sampleWAV(seconds int) []byte {
 	samples := rate * seconds
 	data := make([]byte, 44+samples*2)
 	copy(data[0:4], "RIFF")
-	binary.LittleEndian.PutUint32(data[4:8], uint32(36+samples*2))
+	binary.LittleEndian.PutUint32(data[4:8], uint32(36+samples*2)) // #nosec G115 -- samples is rate*seconds, far below uint32 max
 	copy(data[8:12], "WAVE")
 	copy(data[12:16], "fmt ")
 	binary.LittleEndian.PutUint32(data[16:20], 16)
@@ -133,11 +138,11 @@ func sampleWAV(seconds int) []byte {
 	binary.LittleEndian.PutUint16(data[32:34], 2)
 	binary.LittleEndian.PutUint16(data[34:36], 16)
 	copy(data[36:40], "data")
-	binary.LittleEndian.PutUint32(data[40:44], uint32(samples*2))
+	binary.LittleEndian.PutUint32(data[40:44], uint32(samples*2)) // #nosec G115 -- samples is rate*seconds, far below uint32 max
 	for i := 0; i < samples; i++ {
 		t := float64(i) / rate
 		v := math.Sin(2*math.Pi*220*t) * math.Sin(2*math.Pi*0.8*t) * 0.3
-		binary.LittleEndian.PutUint16(data[44+i*2:], uint16(int16(v*32767)))
+		binary.LittleEndian.PutUint16(data[44+i*2:], uint16(int16(v*32767))) // #nosec G115 -- two's-complement bit pattern is exactly what PCM wants
 	}
 	return data
 }
