@@ -1,0 +1,80 @@
+# Copy to config.yaml and fill in. Any value may reference an environment
+# variable as ${VAR_NAME}.
+
+imap:
+  server: mail.example.com
+  port: 993
+  email: someemail@example.com
+  password: ${IMAP_PASSWORD}
+  subject_filter: PBX      # only mails whose subject contains this are processed
+  poll_interval: 30s
+
+telegram:
+  token: ${TELEGRAM_TOKEN}
+  chat_id: -123456789      # the group chat; commands from other chats are ignored
+
+transcription:
+  enabled: true
+  language: nl-NL
+  google_credentials: /config/googlekey.json
+  # Recommended. When set, ALL audio is routed through this bucket (objects
+  # are deleted right after transcription; give the bucket a 1-day lifecycle
+  # delete rule as a safety net). When empty, audio is sent inline, which
+  # Google limits to ~60 seconds per voicemail.
+  gcs_bucket: ""
+
+# FreePBX HTTP API, used for the storingsdienst phone number switch.
+pbx_ip: 192.168.1.10
+
+ssh:
+  host: 192.168.1.10
+  port: 22
+  username: root
+  password: ${SSH_PASSWORD}
+
+# Chat/web commands. type: ssh runs the command on the PBX over SSH,
+# type: http does a GET request to the url.
+commands:
+  deletevm:
+    type: ssh
+    command: "rm -f /var/spool/asterisk/voicemail/default/9001/INBOX/*.*"
+    success: "Voicemail verwijderd."
+    error: "Probleem bij verwijderen voicemail."
+    description: "Voicemail verwijderen van de centrale (stopt terugbellen)"  # shown in /info
+    primary: true   # frequently used: shown as prominent button in the web UI
+  vivia:
+    type: ssh
+    command: "/var/lib/misc/vivia/vivia.sh"
+    success: "Storingsdienst naar Vivia"
+    error: "Probleem bij omzetten storingsdienst"
+    group: storingsdienst
+  avics:
+    type: ssh
+    command: "/var/lib/misc/avics/avics.sh"
+    success: "Storingsdienst naar Avics"
+    error: "Probleem bij omzetten storingsdienst"
+    group: storingsdienst
+
+# /name in Telegram switches the storingsdienst to this number via the PBX.
+phone_numbers:
+  name1: "0612345678"
+  name2: "0612345678"
+
+cleanup:
+  enabled: true
+  schedule: "0 9 * * 5"    # Friday 09:00
+  timezone: Europe/Amsterdam
+
+web:
+  enabled: true
+  listen: ":8080"
+  password: ""             # set to enable basic auth (username: admin)
+
+storage:
+  database: /data/voicemail.db
+  audio_dir: /data/audio
+
+# Optional: free-form text appended below the dynamically generated /info
+# command list. The list itself is always built from this config.
+# info_file: /config/info.txt
+customers_file: /config/customers.json

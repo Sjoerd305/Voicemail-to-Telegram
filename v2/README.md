@@ -1,0 +1,89 @@
+# Voicemail to Telegram v2
+
+Go rewrite of the original Python setup. One binary replaces the three
+Python scripts (`main.py`, `telegram_listener.py`, `emailcleanup.py`) and adds
+a small web dashboard.
+
+## What it does
+
+- **Mail watcher** — polls the IMAP inbox for PBX voicemail mails, transcribes
+  the attached audio with Google Speech-to-Text and forwards the mail text +
+  transcription + audio to the Telegram group.
+- **Telegram commands** — `/deletevm`, `/vivia`, `/avics`, storingsdienst
+  switches per phone number, `/info`, customer lookups from `customers.json`
+  and of course `/lol`. All commands are defined in `config.yaml` — nothing is
+  hardcoded anymore. `phone_numbers` keys may be full names ("Sjoerd van
+  Dijk"); the Telegram command is the generated slug (`/sjoerd_van_dijk`),
+  with a first-name shortcut (`/sjoerd`) when unambiguous — entries with a
+  `(...)` suffix don't count against the shortcut. `/storingsdienst` lists
+  all generated commands.
+- **Weekly cleanup** — archives the inbox into `INBOX.<year>.<week-1>-<week>`
+  (Friday 09:00 by default, configurable cron expression).
+- **Web dashboard** — voicemail history with audio playback, transcription
+  search, activity log and buttons for the same PBX actions. Voicemails can be
+  marked as afgehandeld (with an open/done filter and open counter), so during
+  storingsdienst you can track which meldingen are handled. Plain TypeScript,
+  embedded into the binary; served on `:8080`.
+
+## Differences from the Python version
+
+- **No more audio splitting.** With `transcription.gcs_bucket` set, every
+  voicemail is transcribed via GCS (uploaded, transcribed, deleted) — one code
+  path that is exercised on every message. Without a bucket, audio is sent
+  inline, which Google limits to ~60s; a longer voicemail is still delivered
+  to Telegram, just with a "transcriptie mislukt" note. Splitting hurt
+  accuracy at segment boundaries and is gone.
+- **No duplicate sends.** A single process with an exclusive lock file, plus
+  every processed mail's Message-ID recorded in SQLite — a voicemail can never
+  be forwarded twice, even across restarts or when the IMAP seen-flag race
+  occurs.
+- **One config file** (`config.yaml`, supports `${ENV_VAR}` references) instead
+  of `config.ini` + `phone_numbers.ini`. `customers.json` still works as
+  before and is hot-reloaded.
+- **`/info` is generated dynamically** from the config (commands with their
+  descriptions, storingsdienst commands, customer lookups) so it can never go
+  stale. An optional `info_file` is appended below the list for free-form
+  notes.
+- Commands only work in the configured group chat (`telegram.chat_id`), not in
+  any group the bot happens to be in.
+- The Google service account key is mounted at runtime, not baked into the
+  Docker image.
+
+## Running locally
+
+```sh
+cp config/config.example.yaml config/config.yaml   # edit it
+cd web && npm ci && npm run build && cd ..          # build the frontend
+go run ./cmd/voicemailbot -config config/config.yaml
+```
+
+## Docker
+
+The easiest way is docker compose:
+
+```sh
+cp config/config.example.yaml config/config.yaml   # edit it
+cp .env.example .env                               # fill in the secrets
+docker compose up -d --build
+```
+
+Or plain docker:
+
+```sh
+docker build -t voicemailapp:v2 .
+docker run -d --name voicemailapp --restart unless-stopped \
+  -v /path/to/config:/config \
+  -v voicemail-data:/data \
+  -p 8080:8080 \
+  voicemailapp:v2
+```
+
+`/config` must contain `config.yaml`, `googlekey.json` and optionally
+`info.txt` / `customers.json`. `/data` holds the SQLite database and stored
+audio files.
+
+## Web dashboard
+
+Open `http://host:8080`. Set `web.password` in the config to protect it with
+basic auth (username `admin`). Set `web.enabled: false` to turn it off
+entirely.
