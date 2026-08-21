@@ -2,7 +2,7 @@ import {
   createElement, type IconNode,
   Voicemail as VoicemailIcon, Phone, PhoneForwarded, Wrench, Play, Pause,
   Download, Check, Archive, Rocket, TriangleAlert, CircleCheck, Inbox, Trash2,
-  ChevronRight,
+  ChevronRight, LogOut,
 } from 'lucide';
 
 function icon(node: IconNode, size = 16): SVGElement {
@@ -45,6 +45,7 @@ interface Status {
   uptime_seconds: number;
   voicemail_count: number;
   watcher: { last_poll: string; last_error: string };
+  auth_enabled: boolean;
 }
 
 let voicemails: Voicemail[] = [];
@@ -57,8 +58,17 @@ const $ = <T extends HTMLElement>(sel: string): T => {
   return el;
 };
 
+// A 401 means the login session expired: reload so the login screen appears.
+function checkAuth(res: Response): void {
+  if (res.status === 401) {
+    location.reload();
+    throw new Error('unauthorized');
+  }
+}
+
 async function getJSON<T>(url: string): Promise<T> {
   const res = await fetch(url);
+  checkAuth(res);
   if (!res.ok) throw new Error(`${url}: ${res.status}`);
   return res.json();
 }
@@ -125,6 +135,7 @@ async function refreshStatus(): Promise<void> {
     $('#stat-poll .stat-value').textContent = s.watcher.last_poll
       ? fmtRelative(s.watcher.last_poll)
       : '–';
+    $('#logout').hidden = !s.auth_enabled;
   } catch {
     health.className = 'health err';
     text.textContent = '⚠ geen verbinding';
@@ -344,6 +355,7 @@ async function setDone(vm: Voicemail, done: boolean, btn: HTMLButtonElement): Pr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ done }),
     });
+    checkAuth(res);
     if (!res.ok) throw new Error(String(res.status));
     const updated = (await res.json()) as Voicemail;
     const idx = voicemails.findIndex(v => v.id === updated.id);
@@ -502,6 +514,7 @@ async function runAction(name: string, button: HTMLButtonElement): Promise<void>
   button.disabled = true;
   try {
     const res = await fetch(`/api/actions/${encodeURIComponent(name)}`, { method: 'POST' });
+    checkAuth(res);
     if (!res.ok) throw new Error(String(res.status));
     const data = (await res.json()) as { ok: boolean; message: string };
     toast(data.message, data.ok);
@@ -639,6 +652,7 @@ async function refreshEvents(): Promise<void> {
 // --- init -------------------------------------------------------------------
 
 $('.brand-icon').append(icon(VoicemailIcon, 22));
+$('#logout').append(icon(LogOut, 15));
 
 $('#search').addEventListener('input', e =>
   renderVoicemails((e.target as HTMLInputElement).value),

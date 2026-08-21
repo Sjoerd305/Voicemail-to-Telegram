@@ -84,6 +84,27 @@ audio files.
 
 ## Web dashboard
 
-Open `http://host:8080`. Set `web.password` in the config to protect it with
-basic auth (username `admin`). Set `web.enabled: false` to turn it off
-entirely.
+Open `http://host:8080`. Set `web.enabled: false` to turn it off entirely.
+
+### Authentication
+
+**Google sign-in (recommended):** set `web.google_auth.client_id` /
+`client_secret` and list who may log in under `allowed_domains` (email
+domains, or single addresses containing an `@`). Everything — pages and API —
+is then behind a login screen with one "Inloggen met Google" button. Sessions
+last 30 days and survive restarts.
+
+Setup in the Google Cloud Console (APIs & Services → Credentials):
+1. Create an OAuth client ID of type "Web application".
+2. Add `<public_url>/auth/callback` as authorized redirect URI — exactly as
+   configured in `web.public_url` (which is required for this feature).
+3. Put the client ID and secret in `.env` (`GOOGLE_CLIENT_ID` /
+   `GOOGLE_CLIENT_SECRET`); the config references them via `${...}`.
+
+With an "External" OAuth consent screen, also add the team's Google accounts
+as test users, or publish the app — `allowed_domains` is what actually gates
+access on our side either way.
+
+**Basic auth (fallback):** when `google_auth` is not configured, setting
+`web.password` protects the dashboard with basic auth (username `admin`).
+Leave both empty and the dashboard is open.

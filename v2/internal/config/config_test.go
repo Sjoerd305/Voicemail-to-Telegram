@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,5 +43,41 @@ func TestLoadExampleWithEnvExpansion(t *testing.T) {
 	}
 	if cfg.Cleanup.Schedule != "0 9 * * 5" {
 		t.Fatalf("cleanup schedule: %q", cfg.Cleanup.Schedule)
+	}
+}
+
+func TestLoadFailsClosedOnPublicURLWithoutAuth(t *testing.T) {
+	t.Setenv("IMAP_PASSWORD", "x")
+	t.Setenv("TELEGRAM_TOKEN", "x")
+	t.Setenv("SSH_PASSWORD", "x")
+	// Simulate empty GOOGLE_* env vars coming through docker compose.
+	t.Setenv("GOOGLE_CLIENT_ID", "")
+	t.Setenv("GOOGLE_CLIENT_SECRET", "")
+
+	raw, err := os.ReadFile("../../config/config.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Replace(string(raw),
+		`public_url: "http://192.168.1.5:8080"`,
+		`public_url: "https://voicemail.example.com"`, 1)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(path); err == nil ||
+		!strings.Contains(err.Error(), "no authentication") {
+		t.Fatalf("expected fail-closed error, got: %v", err)
+	}
+
+	// With an explicit override it loads.
+	content = strings.Replace(content, "web:\n  enabled: true",
+		"web:\n  enabled: true\n  allow_unauthenticated: true", 1)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("override should load: %v", err)
 	}
 }

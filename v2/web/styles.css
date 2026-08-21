@@ -88,6 +88,11 @@ svg.icon { flex: none; }
   border-radius: 999px;
   background: var(--card);
 }
+.header-right { display: flex; align-items: center; gap: .6rem; }
+#logout { display: flex; color: var(--muted); padding: .35rem; border-radius: 8px; }
+#logout[hidden] { display: none; }
+#logout:hover { color: var(--err); background: var(--card-2); }
+
 .health .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .health.ok .dot { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
 .health.warn .dot { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }

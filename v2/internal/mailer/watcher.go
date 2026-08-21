@@ -167,7 +167,7 @@ func (w *Watcher) processMessage(ctx context.Context, client *imapclient.Client,
 		}
 	}
 
-	caption, extra := buildMessage(parsed.Subject, parsed.Text, transcription)
+	caption, extra := buildMessage(parsed.Subject, parsed.Text, transcription, w.cfg.Web.PublicURL)
 	if err := w.notifier.SendVoicemail(caption, extra, parsed.Audio); err != nil {
 		return fmt.Errorf("send telegram: %w", err)
 	}
@@ -250,12 +250,53 @@ func parseMessage(raw []byte) (*parsedMail, error) {
 	return out, nil
 }
 
+// cleanEmailText strips noise from the PBX mail body before it goes to
+// Telegram: "LINK: ..." lines and bare-URL lines (the PBX's own listen
+// link, which nobody uses from the chat).
+func cleanEmailText(text string) string {
+	var keep []string
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.ToLower(strings.TrimSpace(line))
+		if strings.HasPrefix(trimmed, "link") &&
+			(len(trimmed) == 4 || strings.ContainsAny(string(trimmed[4]), ": =")) {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.TrimSpace(strings.Join(keep, "\n"))
+}
+
 // buildMessage produces the Telegram caption (max 1024 chars) plus any
 // overflow as separate text messages. This replaces the old behaviour of
 // re-sending the audio file once per text part.
-func buildMessage(subject, emailText, transcription string) (string, []string) {
-	full := fmt.Sprintf("Subject: %s\nEmail Text: %s\n\nTranscription: %s",
-		subject, emailText, transcription)
+func buildMessage(subject, emailText, transcription, publicURL string) (string, []string) {
+	var b strings.Builder
+	if subject != "" {
+		b.WriteString(subject)
+	}
+	if body := cleanEmailText(emailText); body != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(body)
+	}
+	if b.Len() > 0 {
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Transcriptie: ")
+	if transcription != "" {
+		b.WriteString(transcription)
+	} else {
+		b.WriteString("(geen)")
+	}
+	if publicURL != "" {
+		b.WriteString("\n\nBekijk de melding ook op ")
+		b.WriteString(publicURL)
+	}
+	full := b.String()
 	const captionLimit = 1024
 	if len(full) <= captionLimit {
 		return full, nil

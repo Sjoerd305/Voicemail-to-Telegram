@@ -105,6 +105,16 @@ func run(configPath string) error {
 
 	var srv *http.Server
 	if cfg.Web.Enabled {
+		// Make the effective auth mode unmissable in the logs.
+		switch {
+		case cfg.Web.GoogleAuth.ClientID != "":
+			slog.Info("web auth: google sign-in enabled",
+				"allowed_domains", cfg.Web.GoogleAuth.AllowedDomains)
+		case cfg.Web.Password != "":
+			slog.Info("web auth: basic auth enabled")
+		default:
+			slog.Warn("web auth: NONE — dashboard is accessible without login")
+		}
 		srv = &http.Server{
 			Addr:    cfg.Web.Listen,
 			Handler: web.NewServer(cfg, st, runner, watcher, tgBot).Handler(),

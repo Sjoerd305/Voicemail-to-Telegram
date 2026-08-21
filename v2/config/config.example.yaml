@@ -69,6 +69,19 @@ web:
   enabled: true
   listen: ":8080"
   password: ""             # set to enable basic auth (username: admin)
+  # Address where users reach the dashboard; when set, Telegram voicemail
+  # messages end with "Bekijk de melding ook op <url>". Leave empty to omit.
+  public_url: "http://192.168.1.5:8080"
+  # Google sign-in for the dashboard. Enabled as soon as client_id is set;
+  # public_url is then required (OAuth redirect URL = <public_url>/auth/callback,
+  # register that exact URL in the Google Cloud Console).
+  google_auth:
+    client_id: ${GOOGLE_CLIENT_ID}
+    client_secret: ${GOOGLE_CLIENT_SECRET}
+    # Who may log in: email domains, or single addresses when they contain an @.
+    allowed_domains:
+      - example.com
+      - extern@gmail.com
 
 storage:
   database: /data/voicemail.db

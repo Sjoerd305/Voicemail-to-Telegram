@@ -58,6 +58,9 @@ func (s *Server) Handler() http.Handler {
 	}
 	mux.Handle("GET /", http.FileServerFS(sub))
 
+	if s.cfg.Web.GoogleAuth.ClientID != "" {
+		return newGoogleAuth(s.cfg.Web).middleware(mux)
+	}
 	return s.basicAuth(mux)
 }
 
@@ -90,6 +93,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"uptime_seconds":  int(time.Since(s.started).Seconds()),
 		"voicemail_count": count,
 		"watcher":         s.watcher.Status(),
+		"auth_enabled":    s.cfg.Web.GoogleAuth.ClientID != "",
 	})
 }
 

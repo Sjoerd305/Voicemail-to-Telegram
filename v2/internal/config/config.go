@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -65,10 +66,29 @@ type Cleanup struct {
 	Timezone string `yaml:"timezone"`
 }
 
+// GoogleAuth puts the whole dashboard behind a Google sign-in screen.
+// Enabled when client_id is set; allowed_domains controls who may log in.
+type GoogleAuth struct {
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	// AllowedDomains entries are email domains ("bedrijf.nl") or, when they
+	// contain an @, individual addresses ("extern@gmail.com").
+	AllowedDomains []string `yaml:"allowed_domains"`
+}
+
 type Web struct {
 	Enabled  bool   `yaml:"enabled"`
 	Listen   string `yaml:"listen"`
-	Password string `yaml:"password"` // optional basic auth (user: admin)
+	Password string `yaml:"password"` // optional basic auth (user: admin); ignored when google_auth is enabled
+	// PublicURL is the address where users reach the dashboard, e.g.
+	// "http://192.168.1.5:8080". When set, voicemail messages in Telegram
+	// end with a link to it. Required when google_auth is enabled (it forms
+	// the OAuth redirect URL).
+	PublicURL  string     `yaml:"public_url"`
+	GoogleAuth GoogleAuth `yaml:"google_auth"`
+	// AllowUnauthenticated must be set explicitly to run a publicly
+	// reachable (https public_url) dashboard without any authentication.
+	AllowUnauthenticated bool `yaml:"allow_unauthenticated"`
 }
 
 type Storage struct {
@@ -136,6 +156,25 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.IMAP.PollInterval < 5*time.Second {
 		cfg.IMAP.PollInterval = 5 * time.Second
+	}
+	// Fail closed: a dashboard on a public https URL must not silently run
+	// without authentication (e.g. because the GOOGLE_* env vars came
+	// through empty).
+	if cfg.Web.Enabled && strings.HasPrefix(cfg.Web.PublicURL, "https://") &&
+		cfg.Web.GoogleAuth.ClientID == "" && cfg.Web.Password == "" &&
+		!cfg.Web.AllowUnauthenticated {
+		return nil, fmt.Errorf("web.public_url is public (https) but no authentication is configured — set web.google_auth (check that GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET are non-empty), or web.password, or explicitly set web.allow_unauthenticated: true")
+	}
+	if ga := cfg.Web.GoogleAuth; ga.ClientID != "" {
+		if ga.ClientSecret == "" {
+			return nil, fmt.Errorf("web.google_auth.client_secret is required when client_id is set")
+		}
+		if len(ga.AllowedDomains) == 0 {
+			return nil, fmt.Errorf("web.google_auth.allowed_domains must list at least one domain, otherwise nobody can log in")
+		}
+		if cfg.Web.PublicURL == "" {
+			return nil, fmt.Errorf("web.public_url is required when google_auth is enabled (it forms the OAuth redirect URL)")
+		}
 	}
 	return cfg, nil
 }

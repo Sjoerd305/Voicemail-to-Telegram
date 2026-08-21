@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildMessageShort(t *testing.T) {
-	caption, extra := buildMessage("PBX vm", "text", "hello")
+	caption, extra := buildMessage("PBX vm", "text", "hello", "")
 	if len(extra) != 0 {
 		t.Fatalf("expected no extra parts, got %d", len(extra))
 	}
@@ -16,9 +16,44 @@ func TestBuildMessageShort(t *testing.T) {
 	}
 }
 
+func TestBuildMessageCleansAndLinks(t *testing.T) {
+	email := "Klantnaam: Bakkerij De Molen\nFrom: \"0612345678\" <0612345678>\nLINK: http://pbx.local/listen/123\nhttp://pbx.local/raw\nDuur: 0:23"
+	caption, extra := buildMessage("PBX vm", email, "hallo", "http://voicemail.local:8080")
+	if len(extra) != 0 {
+		t.Fatalf("expected no extra parts, got %d", len(extra))
+	}
+	if strings.Contains(caption, "pbx.local") {
+		t.Fatalf("PBX link not stripped: %q", caption)
+	}
+	for _, want := range []string{
+		"Klantnaam: Bakkerij De Molen",
+		"Duur: 0:23",
+		"Transcriptie: hallo",
+		"Bekijk de melding ook op http://voicemail.local:8080",
+	} {
+		if !strings.Contains(caption, want) {
+			t.Fatalf("caption missing %q:\n%s", want, caption)
+		}
+	}
+	if strings.Contains(caption, "Subject:") || strings.Contains(caption, "Email Text:") {
+		t.Fatalf("old labels still present: %q", caption)
+	}
+}
+
+func TestCleanEmailTextKeepsNormalLines(t *testing.T) {
+	// A line merely starting with the word "link..." is not a LINK: field.
+	got := cleanEmailText("Linksom draaien\nLINK http://x\nGewone regel")
+	if !strings.Contains(got, "Linksom draaien") || !strings.Contains(got, "Gewone regel") {
+		t.Fatalf("stripped too much: %q", got)
+	}
+	if strings.Contains(got, "http://x") {
+		t.Fatalf("LINK line not stripped: %q", got)
+	}
+}
+
 func TestBuildMessageLong(t *testing.T) {
 	long := strings.Repeat("woord ", 1000) // ~6000 bytes
-	caption, extra := buildMessage("PBX vm", "text", long)
+	caption, extra := buildMessage("PBX vm", "text", long, "")
 	if len(caption) > 1024 {
 		t.Fatalf("caption too long: %d", len(caption))
 	}
