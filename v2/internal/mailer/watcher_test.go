@@ -1,6 +1,8 @@
 package mailer
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -84,5 +86,82 @@ func TestFolderName(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	if got := folderName(now); got != "INBOX.2026.33-34" {
 		t.Fatalf("unexpected folder name: %s", got)
+	}
+}
+
+func TestNextBackoffGrowsAndCaps(t *testing.T) {
+	base := 30 * time.Second
+	got := nextBackoff(0, base)
+	if got != base {
+		t.Fatalf("first backoff = %v, want %v", got, base)
+	}
+	// Doubles until it hits the cap and then stays there.
+	for i := 0; i < 20; i++ {
+		next := nextBackoff(got, base)
+		if next < got {
+			t.Fatalf("backoff shrank: %v -> %v", got, next)
+		}
+		got = next
+	}
+	if got != maxBackoff {
+		t.Fatalf("backoff settled at %v, want cap %v", got, maxBackoff)
+	}
+}
+
+func TestSleepCtxReportsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if sleepCtx(ctx, time.Hour) {
+		t.Fatal("sleepCtx should report false on a cancelled context")
+	}
+	if !sleepCtx(context.Background(), time.Millisecond) {
+		t.Fatal("sleepCtx should report true when the timer fires")
+	}
+}
+
+// The unilateral data handler runs on the IMAP read goroutine and must never
+// block it, however many notifications arrive before the watcher reacts.
+func TestMailboxSignalNeverBlocks(t *testing.T) {
+	w := &Watcher{mailbox: make(chan struct{}, 1)}
+	signal := func() {
+		select {
+		case w.mailbox <- struct{}{}:
+		default:
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 1000; i++ {
+			signal()
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("signalling the mailbox channel blocked")
+	}
+	if len(w.mailbox) != 1 {
+		t.Fatalf("expected the notifications to coalesce into 1, got %d", len(w.mailbox))
+	}
+}
+
+func TestStatusReportsMode(t *testing.T) {
+	w := &Watcher{interval: 30 * time.Second}
+	if got := w.Status(); got.Idle || got.CheckIntervalSeconds != 30 {
+		t.Fatalf("unexpected initial status: %+v", got)
+	}
+	w.setMode(true, 2*time.Minute)
+	w.setResult(nil)
+	got := w.Status()
+	if !got.Idle || got.CheckIntervalSeconds != 120 {
+		t.Fatalf("mode not reflected in status: %+v", got)
+	}
+	if got.LastError != "" || got.LastPoll.IsZero() {
+		t.Fatalf("successful check not recorded: %+v", got)
+	}
+	w.setResult(errors.New("boom"))
+	if got := w.Status(); got.LastError != "boom" {
+		t.Fatalf("error not recorded: %+v", got)
 	}
 }

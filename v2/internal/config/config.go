@@ -16,8 +16,20 @@ type IMAP struct {
 	Email    string `yaml:"email"`
 	Password string `yaml:"password"`
 	// Subject substring that identifies voicemail mails, e.g. "PBX".
-	SubjectFilter string        `yaml:"subject_filter"`
-	PollInterval  time.Duration `yaml:"poll_interval"`
+	SubjectFilter string `yaml:"subject_filter"`
+	// PollInterval is how often the inbox is checked when IDLE is not used.
+	PollInterval time.Duration `yaml:"poll_interval"`
+	// UseIDLE keeps one authenticated connection open and lets the server
+	// push new-mail notifications (RFC 2177) instead of reconnecting on a
+	// timer. Reconnecting every poll_interval means thousands of logins a
+	// day, which hosted mail servers throttle. Falls back to plain polling
+	// when the server does not advertise IDLE.
+	UseIDLE bool `yaml:"use_idle"`
+	// IdleFallbackInterval forces a regular inbox check even while idling.
+	// It is the safety net for a missed push notification and doubles as the
+	// liveness check that notices a silently dropped connection, so it also
+	// bounds how long the watcher can be blind.
+	IdleFallbackInterval time.Duration `yaml:"idle_fallback_interval"`
 }
 
 type Telegram struct {
@@ -122,9 +134,11 @@ func Load(path string) (*Config, error) {
 
 	cfg := &Config{
 		IMAP: IMAP{
-			Port:          993,
-			SubjectFilter: "PBX",
-			PollInterval:  30 * time.Second,
+			Port:                 993,
+			SubjectFilter:        "PBX",
+			PollInterval:         30 * time.Second,
+			UseIDLE:              true,
+			IdleFallbackInterval: 2 * time.Minute,
 		},
 		Transcription: Transcription{
 			Enabled:  true,
@@ -160,6 +174,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.IMAP.PollInterval < 5*time.Second {
 		cfg.IMAP.PollInterval = 5 * time.Second
+	}
+	if cfg.IMAP.IdleFallbackInterval < 30*time.Second {
+		cfg.IMAP.IdleFallbackInterval = 30 * time.Second
 	}
 	// Fail closed: a dashboard on a public https URL must not silently run
 	// without authentication (e.g. because the GOOGLE_* env vars came

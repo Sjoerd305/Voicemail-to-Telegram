@@ -44,7 +44,7 @@ interface Action {
 interface Status {
   uptime_seconds: number;
   voicemail_count: number;
-  watcher: { last_poll: string; last_error: string };
+  watcher: { last_poll: string; last_error: string; idle: boolean; check_interval_seconds: number };
   auth_enabled: boolean;
 }
 
@@ -119,14 +119,20 @@ async function refreshStatus(): Promise<void> {
   try {
     const s = await getJSON<Status>('/api/status');
     const pollAge = (Date.now() - new Date(s.watcher.last_poll).getTime()) / 1000;
+    // The backend checks every check_interval_seconds (30s when polling, a few
+    // minutes when idling on a pushed connection), so the staleness threshold
+    // has to follow it instead of being a fixed number.
+    const maxAge = s.watcher.check_interval_seconds * 2 + 30;
     if (s.watcher.last_error) {
       health.className = 'health err';
       text.textContent = `storing: ${s.watcher.last_error.slice(0, 60)}`;
       text.title = s.watcher.last_error;
-    } else if (s.watcher.last_poll && pollAge < 150) {
+    } else if (s.watcher.last_poll && pollAge < maxAge) {
       health.className = 'health ok';
       text.textContent = 'actief';
-      text.title = '';
+      text.title = s.watcher.idle
+        ? 'verbonden met de mailserver, nieuwe voicemails komen direct binnen'
+        : `inbox wordt elke ${s.watcher.check_interval_seconds}s gecontroleerd`;
     } else {
       health.className = 'health warn';
       text.textContent = s.watcher.last_poll ? 'poll loopt achter' : 'wachten op eerste poll';

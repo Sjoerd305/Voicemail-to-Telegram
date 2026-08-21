@@ -6,9 +6,12 @@ a small web dashboard.
 
 ## What it does
 
-- **Mail watcher** — polls the IMAP inbox for PBX voicemail mails, transcribes
+- **Mail watcher** — watches the IMAP inbox for PBX voicemail mails, transcribes
   the attached audio with Google Speech-to-Text and forwards the mail text +
-  transcription + audio to the Telegram group.
+  transcription + audio to the Telegram group. It holds one logged-in
+  connection open and lets the server push new-mail notifications (IMAP IDLE),
+  so a voicemail reaches Telegram within a second instead of waiting for the
+  next poll. See [IMAP connection](#imap-connection).
 - **Telegram commands** — `/deletevm`, `/vivia`, `/avics`, storingsdienst
   switches per phone number, `/info`, customer lookups from `customers.json`
   and of course `/lol`. All commands are defined in `config.yaml` — nothing is
@@ -33,6 +36,10 @@ a small web dashboard.
   inline, which Google limits to ~60s; a longer voicemail is still delivered
   to Telegram, just with a "transcriptie mislukt" note. Splitting hurt
   accuracy at segment boundaries and is gone.
+- **One IMAP login instead of thousands.** The Python version reconnected and
+  logged in on every poll; hosted providers throttle repeated authentication as
+  a brute-force defence, which showed up as occasional login timeouts and
+  rejections. See [IMAP connection](#imap-connection).
 - **No duplicate sends.** A single process with an exclusive lock file, plus
   every processed mail's Message-ID recorded in SQLite — a voicemail can never
   be forwarded twice, even across restarts or when the IMAP seen-flag race
@@ -81,6 +88,29 @@ docker run -d --name voicemailapp --restart unless-stopped \
 `/config` must contain `config.yaml`, `googlekey.json` and optionally
 `info.txt` / `customers.json`. `/data` holds the SQLite database and stored
 audio files.
+
+## IMAP connection
+
+The watcher keeps a single authenticated connection open for as long as the
+server allows, rather than dialling and logging in on a timer. At a 30 second
+interval the old approach meant roughly 2,900 logins a day, and the login — not
+the inbox check — is the part mail hosts rate-limit.
+
+On that connection it uses **IDLE** (RFC 2177): the server pushes a
+notification the moment mail arrives, so there is no polling delay at all. Three
+things keep that honest:
+
+- `idle_fallback_interval` (default `2m`) runs a normal search anyway. It
+  catches a missed notification and, because a dead connection fails the
+  search, bounds how long the watcher can be silently blind.
+- Servers that do not advertise IDLE fall back to plain polling every
+  `poll_interval`. Set `use_idle: false` to force that.
+- A failed connection retries with exponential backoff (`poll_interval`
+  doubling up to 5 minutes), so a server that is throttling us is not hammered
+  into extending the block.
+
+The dashboard health indicator follows whichever mode is active; hover it to
+see which one.
 
 ## Web dashboard
 

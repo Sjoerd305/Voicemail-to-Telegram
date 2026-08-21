@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -27,68 +30,236 @@ type Notifier interface {
 	SendVoicemail(caption string, extraParts []string, audio []byte) error
 }
 
+const (
+	// dialTimeout bounds the TCP+TLS handshake. The library default is 30s,
+	// long enough that a wedged connect visibly delays shutdown.
+	dialTimeout = 15 * time.Second
+	// maxBackoff caps the retry delay after connection failures. Retrying at
+	// full speed against a server that is rate-limiting us only extends the
+	// block, so consecutive failures back off.
+	maxBackoff = 5 * time.Minute
+	// minSessionUptime is how long a session must have lasted before it
+	// counts as healthy and the backoff resets.
+	minSessionUptime = time.Minute
+)
+
 type Watcher struct {
 	cfg         *config.Config
 	store       *store.Store
 	transcriber *transcribe.Transcriber
 	notifier    Notifier
 
+	// mailbox carries server-pushed "mailbox changed" notifications. It is
+	// buffered so the IMAP read goroutine never blocks signalling it, and a
+	// depth of one is enough: the reaction is always the same full search.
+	mailbox chan struct{}
+
+	mu        sync.Mutex
 	lastPoll  time.Time
 	lastError string
+	idle      bool
+	interval  time.Duration
 }
 
 func NewWatcher(cfg *config.Config, st *store.Store, tr *transcribe.Transcriber, n Notifier) *Watcher {
-	return &Watcher{cfg: cfg, store: st, transcriber: tr, notifier: n}
+	return &Watcher{
+		cfg:         cfg,
+		store:       st,
+		transcriber: tr,
+		notifier:    n,
+		mailbox:     make(chan struct{}, 1),
+		interval:    cfg.IMAP.PollInterval,
+	}
 }
 
 type Status struct {
 	LastPoll  time.Time `json:"last_poll"`
 	LastError string    `json:"last_error"`
+	// Idle reports whether the server pushes new-mail notifications.
+	Idle bool `json:"idle"`
+	// CheckIntervalSeconds is how long the dashboard should wait before
+	// treating a missing check as "behind"; it differs between idle and
+	// polling mode.
+	CheckIntervalSeconds int `json:"check_interval_seconds"`
 }
 
 func (w *Watcher) Status() Status {
-	return Status{LastPoll: w.lastPoll, LastError: w.lastError}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return Status{
+		LastPoll:             w.lastPoll,
+		LastError:            w.lastError,
+		Idle:                 w.idle,
+		CheckIntervalSeconds: int(w.interval.Seconds()),
+	}
 }
 
-// Run polls until the context is cancelled.
+func (w *Watcher) setResult(err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.lastPoll = time.Now()
+	if err != nil {
+		w.lastError = err.Error()
+	} else {
+		w.lastError = ""
+	}
+}
+
+func (w *Watcher) setMode(idle bool, interval time.Duration) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.idle = idle
+	w.interval = interval
+}
+
+// Run keeps a mail session alive until the context is cancelled, reconnecting
+// with backoff whenever one dies.
 func (w *Watcher) Run(ctx context.Context) {
 	slog.Info("mail watcher started",
-		"server", w.cfg.IMAP.Server, "interval", w.cfg.IMAP.PollInterval)
-	ticker := time.NewTicker(w.cfg.IMAP.PollInterval)
-	defer ticker.Stop()
+		"server", w.cfg.IMAP.Server,
+		"use_idle", w.cfg.IMAP.UseIDLE,
+		"poll_interval", w.cfg.IMAP.PollInterval,
+		"idle_fallback_interval", w.cfg.IMAP.IdleFallbackInterval)
+
+	var backoff time.Duration
 	for {
-		if err := w.poll(ctx); err != nil {
-			w.lastError = err.Error()
-			slog.Error("mail poll failed", "err", err)
-		} else {
-			w.lastError = ""
-		}
-		w.lastPoll = time.Now()
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return
-		case <-ticker.C:
+		}
+		if backoff > 0 {
+			slog.Warn("reconnecting to imap after failure", "in", backoff)
+			if !sleepCtx(ctx, backoff) {
+				return
+			}
+		}
+
+		started := time.Now()
+		err := w.session(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		w.setMode(false, w.cfg.IMAP.PollInterval)
+		w.setResult(err)
+		slog.Error("imap session ended", "err", err, "uptime", time.Since(started).Round(time.Second))
+
+		// A session that ran for a while was healthy; only rapid-fire
+		// failures should escalate the delay.
+		if time.Since(started) > minSessionUptime {
+			backoff = 0
+		}
+		backoff = nextBackoff(backoff, w.cfg.IMAP.PollInterval)
+	}
+}
+
+// session logs in once and then holds that connection for as long as the
+// server allows. Dialing and authenticating per check would mean roughly 2900
+// logins a day at a 30s interval, which hosted providers throttle as a
+// brute-force defence — the login, not the inbox check, is the expensive part.
+func (w *Watcher) session(ctx context.Context) error {
+	client, err := w.connect()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Best effort: on a broken connection both of these fail, and the
+		// caller is already reconnecting.
+		_ = client.Logout().Wait()
+		_ = client.Close()
+	}()
+
+	useIdle := w.cfg.IMAP.UseIDLE && client.Caps().Has(imap.CapIdle)
+	if w.cfg.IMAP.UseIDLE && !useIdle {
+		slog.Warn("imap server does not advertise IDLE, falling back to polling",
+			"server", w.cfg.IMAP.Server)
+	}
+	interval := w.cfg.IMAP.PollInterval
+	if useIdle {
+		interval = w.cfg.IMAP.IdleFallbackInterval
+	}
+	w.setMode(useIdle, interval)
+	slog.Info("imap connected", "idle", useIdle, "check_interval", interval)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		// Drain any pending notification *before* searching, not after: mail
+		// that arrives while we are transcribing must leave the flag set so
+		// the next wait returns immediately instead of swallowing it.
+		select {
+		case <-w.mailbox:
+		default:
+		}
+
+		err := w.check(ctx, client)
+		w.setResult(err)
+		if err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if useIdle {
+			// While IDLE runs no other command may be sent, so the loop waits
+			// here until the server pushes something, the safety-net ticker
+			// fires, or we are shutting down.
+			idleCmd, err := client.Idle()
+			if err != nil {
+				return fmt.Errorf("imap idle: %w", err)
+			}
+			select {
+			case <-ctx.Done():
+			case <-w.mailbox:
+			case <-ticker.C:
+			}
+			if err := idleCmd.Close(); err != nil {
+				return fmt.Errorf("stop imap idle: %w", err)
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+			case <-ticker.C:
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 }
 
-func (w *Watcher) poll(ctx context.Context) error {
-	addr := fmt.Sprintf("%s:%d", w.cfg.IMAP.Server, w.cfg.IMAP.Port)
-	client, err := imapclient.DialTLS(addr, nil)
+func (w *Watcher) connect() (*imapclient.Client, error) {
+	addr := net.JoinHostPort(w.cfg.IMAP.Server, strconv.Itoa(w.cfg.IMAP.Port))
+	client, err := imapclient.DialTLS(addr, &imapclient.Options{
+		Dialer: &net.Dialer{Timeout: dialTimeout},
+		UnilateralDataHandler: &imapclient.UnilateralDataHandler{
+			// This runs on the client's read goroutine and blocks it, so it
+			// may only signal — never do the actual work here.
+			Mailbox: func(*imapclient.UnilateralDataMailbox) {
+				select {
+				case w.mailbox <- struct{}{}:
+				default:
+				}
+			},
+		},
+	})
 	if err != nil {
-		return fmt.Errorf("dial imap: %w", err)
+		return nil, fmt.Errorf("dial imap: %w", err)
 	}
-	defer client.Close()
-
 	if err := client.Login(w.cfg.IMAP.Email, w.cfg.IMAP.Password).Wait(); err != nil {
-		return fmt.Errorf("imap login: %w", err)
+		_ = client.Close()
+		return nil, fmt.Errorf("imap login: %w", err)
 	}
-	defer client.Logout()
-
 	if _, err := client.Select("INBOX", nil).Wait(); err != nil {
-		return fmt.Errorf("select inbox: %w", err)
+		_ = client.Close()
+		return nil, fmt.Errorf("select inbox: %w", err)
 	}
+	return client, nil
+}
 
+// check searches the already-selected INBOX and processes what it finds.
+// Returning an error tears the session down, so the caller reconnects.
+func (w *Watcher) check(ctx context.Context, client *imapclient.Client) error {
 	criteria := &imap.SearchCriteria{
 		NotFlag: []imap.Flag{imap.FlagSeen},
 		Header: []imap.SearchCriteriaHeaderField{
@@ -115,7 +286,7 @@ func (w *Watcher) poll(ctx context.Context) error {
 			continue
 		}
 		// Only mark seen after successful processing, so failures are
-		// retried on the next poll.
+		// retried on the next check.
 		uidSet := imap.UIDSetNum(uid)
 		if err := client.Store(uidSet, &imap.StoreFlags{
 			Op:     imap.StoreFlagsAdd,
@@ -126,6 +297,28 @@ func (w *Watcher) poll(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func nextBackoff(current, base time.Duration) time.Duration {
+	if current <= 0 {
+		return base
+	}
+	if next := current * 2; next < maxBackoff {
+		return next
+	}
+	return maxBackoff
+}
+
+// sleepCtx waits for d, reporting false if the context was cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (w *Watcher) processMessage(ctx context.Context, client *imapclient.Client, uid imap.UID) error {

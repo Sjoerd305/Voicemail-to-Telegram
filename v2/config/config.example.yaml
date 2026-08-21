@@ -7,6 +7,14 @@ imap:
   email: someemail@example.com
   password: ${IMAP_PASSWORD}
   subject_filter: PBX      # only mails whose subject contains this are processed
+  # Keep one connection open and let the server push new-mail notifications
+  # (IMAP IDLE) instead of logging in on a timer. Set to false to force plain
+  # polling; the watcher also falls back to it when the server has no IDLE.
+  use_idle: true
+  # Only used when idling: how often to check anyway, as a safety net for a
+  # missed notification and to notice a dropped connection.
+  idle_fallback_interval: 2m
+  # Only used when not idling.
   poll_interval: 30s
 
 telegram:

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadExampleWithEnvExpansion(t *testing.T) {
@@ -79,5 +80,45 @@ func TestLoadFailsClosedOnPublicURLWithoutAuth(t *testing.T) {
 	}
 	if _, err := Load(path); err != nil {
 		t.Fatalf("override should load: %v", err)
+	}
+}
+
+func TestIMAPIdleDefaults(t *testing.T) {
+	t.Setenv("IMAP_PASSWORD", "pw")
+	t.Setenv("TELEGRAM_TOKEN", "tok")
+
+	write := func(imapExtra string) *Config {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		body := "imap:\n  server: mail.example.com\n  email: a@example.com\n" +
+			"  password: ${IMAP_PASSWORD}\n" + imapExtra +
+			"telegram:\n  token: ${TELEGRAM_TOKEN}\n  chat_id: -1\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+
+	// IDLE is on unless the operator turns it off, so an existing config file
+	// that predates the setting gets the pushed connection.
+	cfg := write("")
+	if !cfg.IMAP.UseIDLE {
+		t.Fatal("use_idle should default to true")
+	}
+	if cfg.IMAP.IdleFallbackInterval != 2*time.Minute {
+		t.Fatalf("idle_fallback_interval default: %v", cfg.IMAP.IdleFallbackInterval)
+	}
+
+	if cfg := write("  use_idle: false\n"); cfg.IMAP.UseIDLE {
+		t.Fatal("use_idle: false was ignored")
+	}
+
+	// A too-eager fallback would defeat the point of holding the connection.
+	if cfg := write("  idle_fallback_interval: 1s\n"); cfg.IMAP.IdleFallbackInterval != 30*time.Second {
+		t.Fatalf("fallback interval not clamped: %v", cfg.IMAP.IdleFallbackInterval)
 	}
 }
