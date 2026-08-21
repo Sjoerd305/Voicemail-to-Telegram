@@ -73,7 +73,8 @@ func (t *Transcriber) Transcribe(ctx context.Context, wav []byte) (string, error
 	}
 
 	dur, sampleRate := probeWAV(wav)
-	slog.Info("transcribing voicemail", "duration", dur.Round(time.Second), "sample_rate", sampleRate)
+	slog.Info("transcribing voicemail",
+		"duration", dur.Round(time.Second), "sample_rate", sampleRate, "model", t.cfg.Model)
 
 	recCfg := &speechpb.RecognitionConfig{
 		// For WAV input the encoding and sample rate are read from the file
@@ -81,6 +82,10 @@ func (t *Transcriber) Transcribe(ctx context.Context, wav []byte) (string, error
 		Encoding:        speechpb.RecognitionConfig_LINEAR16,
 		SampleRateHertz: sampleRate,
 		LanguageCode:    t.cfg.Language,
+		// "telephony" is the premium phone-audio model (successor of the
+		// enhanced phone_call model, which has no nl-NL variant); it is billed
+		// at the enhanced rate without needing the use_enhanced flag.
+		Model: t.cfg.Model,
 	}
 
 	// One route per deployment: with a bucket configured, all audio goes

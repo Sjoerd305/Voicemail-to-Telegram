@@ -29,6 +29,9 @@ type Transcription struct {
 	Enabled         bool   `yaml:"enabled"`
 	Language        string `yaml:"language"`
 	CredentialsFile string `yaml:"google_credentials"`
+	// Recognition model. "telephony" is the premium model tuned for phone
+	// audio and supports nl-NL; "latest_long" and "default" also work.
+	Model string `yaml:"model"`
 	// Optional. Needed only for voicemails longer than ~60s; shorter audio is
 	// transcribed inline without a bucket.
 	GCSBucket string `yaml:"gcs_bucket"`
@@ -126,6 +129,7 @@ func Load(path string) (*Config, error) {
 		Transcription: Transcription{
 			Enabled:  true,
 			Language: "nl-NL",
+			Model:    "telephony",
 		},
 		SSH: SSH{Port: 22},
 		Cleanup: Cleanup{

@@ -17,6 +17,9 @@ transcription:
   enabled: true
   language: nl-NL
   google_credentials: /config/googlekey.json
+  # Recognition model: "telephony" (default) is tuned for phone audio and
+  # billed at the enhanced rate; "latest_long" or "default" also work.
+  # model: telephony
   # Recommended. When set, ALL audio is routed through this bucket (objects
   # are deleted right after transcription; give the bucket a 1-day lifecycle
   # delete rule as a safety net). When empty, audio is sent inline, which
