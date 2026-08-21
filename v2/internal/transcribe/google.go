@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/auth/credentials"
-	speech "cloud.google.com/go/speech/apiv1"
-	"cloud.google.com/go/speech/apiv1/speechpb"
+	speech "cloud.google.com/go/speech/apiv2"
+	"cloud.google.com/go/speech/apiv2/speechpb"
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/option"
 
@@ -21,6 +21,9 @@ type Transcriber struct {
 	cfg     config.Transcription
 	speech  *speech.Client
 	storage *storage.Client
+	// recognizer is the implicit ("_") recognizer resource path; model and
+	// language are passed per request instead of stored in a recognizer.
+	recognizer string
 }
 
 func New(ctx context.Context, cfg config.Transcription) (*Transcriber, error) {
@@ -37,12 +40,28 @@ func New(ctx context.Context, cfg config.Transcription) (*Transcriber, error) {
 	if err != nil {
 		return nil, fmt.Errorf("google credentials: %w", err)
 	}
+	project := cfg.ProjectID
+	if project == "" {
+		project, err = creds.ProjectID(ctx)
+		if err != nil || project == "" {
+			return nil, fmt.Errorf("transcription.google_project is not set and the credentials carry no project id: %w", err)
+		}
+	}
 	opts := []option.ClientOption{option.WithAuthCredentials(creds)}
-	sc, err := speech.NewClient(ctx, opts...)
+	speechOpts := opts
+	// Chirp models only exist on regional endpoints; "global" uses the default.
+	if cfg.Location != "global" {
+		speechOpts = append(speechOpts, option.WithEndpoint(cfg.Location+"-speech.googleapis.com:443"))
+	}
+	sc, err := speech.NewClient(ctx, speechOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("speech client: %w", err)
 	}
-	t := &Transcriber{cfg: cfg, speech: sc}
+	t := &Transcriber{
+		cfg:        cfg,
+		speech:     sc,
+		recognizer: fmt.Sprintf("projects/%s/locations/%s/recognizers/_", project, cfg.Location),
+	}
 	if cfg.GCSBucket != "" {
 		gcs, err := storage.NewClient(ctx, opts...)
 		if err != nil {
@@ -63,24 +82,26 @@ func (t *Transcriber) Close() {
 	}
 }
 
-// Transcribe converts a WAV voicemail to text. When a GCS bucket is
-// configured, all audio is routed through it (the object is deleted again
-// afterwards); without a bucket, audio is sent inline, which Google limits
-// to ~60 seconds. No more splitting into segments.
+// Transcribe converts a WAV voicemail to text via Speech-to-Text v2. When a
+// GCS bucket is configured, all audio is routed through it (the object is
+// deleted again afterwards); without a bucket, audio is sent inline, which
+// Google limits to ~60 seconds. No more splitting into segments.
 func (t *Transcriber) Transcribe(ctx context.Context, wav []byte) (string, error) {
 	if !t.cfg.Enabled || t.speech == nil {
 		return "", nil
 	}
 
 	dur, sampleRate := probeWAV(wav)
-	slog.Info("transcribing voicemail", "duration", dur.Round(time.Second), "sample_rate", sampleRate)
+	slog.Info("transcribing voicemail",
+		"duration", dur.Round(time.Second), "sample_rate", sampleRate, "model", t.cfg.Model)
 
 	recCfg := &speechpb.RecognitionConfig{
-		// For WAV input the encoding and sample rate are read from the file
-		// header; we still pass the sample rate as a fallback.
-		Encoding:        speechpb.RecognitionConfig_LINEAR16,
-		SampleRateHertz: sampleRate,
-		LanguageCode:    t.cfg.Language,
+		// Encoding and sample rate are read from the WAV header.
+		DecodingConfig: &speechpb.RecognitionConfig_AutoDecodingConfig{
+			AutoDecodingConfig: &speechpb.AutoDetectDecodingConfig{},
+		},
+		Model:         t.cfg.Model,
+		LanguageCodes: []string{t.cfg.Language},
 	}
 
 	// One route per deployment: with a bucket configured, all audio goes
@@ -90,16 +111,15 @@ func (t *Transcriber) Transcribe(ctx context.Context, wav []byte) (string, error
 	// silently mask a broken bucket configuration.
 	if t.storage == nil {
 		resp, err := t.speech.Recognize(ctx, &speechpb.RecognizeRequest{
-			Config: recCfg,
-			Audio: &speechpb.RecognitionAudio{
-				AudioSource: &speechpb.RecognitionAudio_Content{Content: wav},
-			},
+			Recognizer:  t.recognizer,
+			Config:      recCfg,
+			AudioSource: &speechpb.RecognizeRequest_Content{Content: wav},
 		})
 		if err != nil {
 			return "", fmt.Errorf("inline recognize (audio %s, no gcs_bucket configured): %w",
 				dur.Round(time.Second), err)
 		}
-		return joinResults(resp.Results), nil
+		return joinResults(resp.GetResults()), nil
 	}
 
 	objName := fmt.Sprintf("voicemail-%d.wav", time.Now().UnixNano())
@@ -117,31 +137,43 @@ func (t *Transcriber) Transcribe(ctx context.Context, wav []byte) (string, error
 		}
 	}()
 
-	op, err := t.speech.LongRunningRecognize(ctx, &speechpb.LongRunningRecognizeRequest{
-		Config: recCfg,
-		Audio: &speechpb.RecognitionAudio{
-			AudioSource: &speechpb.RecognitionAudio_Uri{
-				Uri: fmt.Sprintf("gs://%s/%s", t.cfg.GCSBucket, objName),
+	uri := fmt.Sprintf("gs://%s/%s", t.cfg.GCSBucket, objName)
+	op, err := t.speech.BatchRecognize(ctx, &speechpb.BatchRecognizeRequest{
+		Recognizer: t.recognizer,
+		Config:     recCfg,
+		Files: []*speechpb.BatchRecognizeFileMetadata{
+			{AudioSource: &speechpb.BatchRecognizeFileMetadata_Uri{Uri: uri}},
+		},
+		RecognitionOutputConfig: &speechpb.RecognitionOutputConfig{
+			Output: &speechpb.RecognitionOutputConfig_InlineResponseConfig{
+				InlineResponseConfig: &speechpb.InlineOutputConfig{},
 			},
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("long running recognize: %w", err)
+		return "", fmt.Errorf("batch recognize: %w", err)
 	}
 	opCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	resp, err := op.Wait(opCtx)
 	if err != nil {
-		return "", fmt.Errorf("long running recognize wait: %w", err)
+		return "", fmt.Errorf("batch recognize wait: %w", err)
 	}
-	return joinResults(resp.Results), nil
+	fileResult := resp.GetResults()[uri]
+	if fileResult == nil {
+		return "", fmt.Errorf("batch recognize: no result for %s", uri)
+	}
+	if st := fileResult.GetError(); st != nil {
+		return "", fmt.Errorf("batch recognize: %s", st.GetMessage())
+	}
+	return joinResults(fileResult.GetInlineResult().GetTranscript().GetResults()), nil
 }
 
 func joinResults(results []*speechpb.SpeechRecognitionResult) string {
 	var b strings.Builder
 	for _, r := range results {
-		if len(r.Alternatives) > 0 {
-			b.WriteString(r.Alternatives[0].Transcript)
+		if len(r.GetAlternatives()) > 0 {
+			b.WriteString(r.GetAlternatives()[0].GetTranscript())
 		}
 	}
 	return strings.TrimSpace(b.String())

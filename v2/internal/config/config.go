@@ -29,6 +29,12 @@ type Transcription struct {
 	Enabled         bool   `yaml:"enabled"`
 	Language        string `yaml:"language"`
 	CredentialsFile string `yaml:"google_credentials"`
+	// Optional. Defaults to the project of the service-account credentials.
+	ProjectID string `yaml:"google_project"`
+	// Location and Model select the Speech-to-Text v2 recognizer. Chirp
+	// models are region-bound; chirp_3 is GA in the "eu" multi-region.
+	Location string `yaml:"location"`
+	Model    string `yaml:"model"`
 	// Optional. Needed only for voicemails longer than ~60s; shorter audio is
 	// transcribed inline without a bucket.
 	GCSBucket string `yaml:"gcs_bucket"`
@@ -126,6 +132,8 @@ func Load(path string) (*Config, error) {
 		Transcription: Transcription{
 			Enabled:  true,
 			Language: "nl-NL",
+			Location: "eu",
+			Model:    "chirp_3",
 		},
 		SSH: SSH{Port: 22},
 		Cleanup: Cleanup{
