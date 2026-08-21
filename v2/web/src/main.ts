@@ -104,6 +104,12 @@ function fmtRelative(iso: string): string {
   return `${d.toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' })} ${time}`;
 }
 
+// Renders a check interval the way the config writes it: 30s, 2 min, 5 min.
+function fmtInterval(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.round(seconds / 60)} min`;
+}
+
 function fmtClock(seconds: number): string {
   if (!isFinite(seconds)) return '0:00';
   const m = Math.floor(seconds / 60);
@@ -118,29 +124,40 @@ async function refreshStatus(): Promise<void> {
   const text = $('.health-text');
   try {
     const s = await getJSON<Status>('/api/status');
-    const pollAge = (Date.now() - new Date(s.watcher.last_poll).getTime()) / 1000;
-    // The backend checks every check_interval_seconds (30s when polling, a few
-    // minutes when idling on a pushed connection), so the staleness threshold
-    // has to follow it instead of being a fixed number.
-    const maxAge = s.watcher.check_interval_seconds * 2 + 30;
-    if (s.watcher.last_error) {
+    const w = s.watcher;
+    const checkAge = (Date.now() - new Date(w.last_poll).getTime()) / 1000;
+    const every = fmtInterval(w.check_interval_seconds);
+    // In IDLE mode the server pushes new mail the moment it arrives, so time
+    // since the last check says nothing about how current we are — the
+    // periodic check is only a backstop that proves the connection is alive.
+    // In polling mode that same age *is* the freshness, hence the two wordings.
+    const stale = checkAge >= w.check_interval_seconds * 2 + 30;
+    if (w.last_error) {
       health.className = 'health err';
-      text.textContent = `storing: ${s.watcher.last_error.slice(0, 60)}`;
-      text.title = s.watcher.last_error;
-    } else if (s.watcher.last_poll && pollAge < maxAge) {
+      text.textContent = `storing: ${w.last_error.slice(0, 60)}`;
+      text.title = w.last_error;
+    } else if (!w.last_poll) {
+      health.className = 'health warn';
+      text.textContent = 'wachten op eerste controle';
+      text.title = '';
+    } else if (!stale) {
       health.className = 'health ok';
-      text.textContent = 'actief';
-      text.title = s.watcher.idle
-        ? 'verbonden met de mailserver, nieuwe voicemails komen direct binnen'
-        : `inbox wordt elke ${s.watcher.check_interval_seconds}s gecontroleerd`;
+      text.textContent = w.idle ? 'actief · directe meldingen' : 'actief';
+      text.title = w.idle
+        ? `verbonden met de mailserver: een voicemail komt direct binnen. Controle als achtervang elke ${every}.`
+        : `inbox wordt elke ${every} gecontroleerd`;
     } else {
       health.className = 'health warn';
-      text.textContent = s.watcher.last_poll ? 'poll loopt achter' : 'wachten op eerste poll';
+      // Only reachable when the backstop itself stopped running, which in IDLE
+      // mode means the connection is suspect rather than that we are behind.
+      text.textContent = w.idle ? 'verbinding onzeker' : 'poll loopt achter';
+      text.title = w.idle
+        ? `geen controle meer sinds ${Math.round(checkAge)}s, terwijl die elke ${every} hoort te lopen — de verbinding met de mailserver is mogelijk weggevallen`
+        : `laatste controle ${Math.round(checkAge)}s geleden, verwacht elke ${every}`;
     }
     $('#stat-total .stat-value').textContent = String(s.voicemail_count);
-    $('#stat-poll .stat-value').textContent = s.watcher.last_poll
-      ? fmtRelative(s.watcher.last_poll)
-      : '–';
+    $('#stat-poll .stat-value').textContent = w.last_poll ? fmtRelative(w.last_poll) : '–';
+    $('#stat-poll .stat-label').textContent = w.idle ? 'Laatste controle' : 'Laatste poll';
     $('#logout').hidden = !s.auth_enabled;
   } catch {
     health.className = 'health err';
