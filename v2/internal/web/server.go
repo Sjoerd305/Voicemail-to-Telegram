@@ -118,6 +118,14 @@ func (s *Server) handleListVoicemails(w http.ResponseWriter, r *http.Request) {
 		f := false
 		opts.Done = &f
 	}
+	// since/until are ISO timestamps from the browser (its local day/week
+	// boundaries, expressed in UTC).
+	if v := q.Get("since"); v != "" {
+		opts.Since, _ = time.Parse(time.RFC3339, v)
+	}
+	if v := q.Get("until"); v != "" {
+		opts.Until, _ = time.Parse(time.RFC3339, v)
+	}
 	page, err := s.store.ListVoicemails(opts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -102,6 +102,9 @@ func run(configPath string) error {
 
 	go watcher.Run(ctx)
 	go tgBot.Run(ctx)
+	if cfg.Storage.AudioRetentionDays > 0 {
+		go pruneAudioLoop(ctx, st, cfg.Storage.AudioRetentionDays)
+	}
 
 	var srv *http.Server
 	if cfg.Web.Enabled {
@@ -155,4 +158,32 @@ func acquireLock(path string) (func(), error) {
 		_ = f.Close()
 		_ = os.Remove(path)
 	}, nil
+}
+
+// pruneAudioLoop removes recordings older than the retention window, once at
+// startup and then daily. Text is never removed.
+func pruneAudioLoop(ctx context.Context, st *store.Store, days int) {
+	prune := func() {
+		cutoff := time.Now().AddDate(0, 0, -days)
+		n, err := st.PruneAudio(cutoff)
+		if err != nil {
+			slog.Error("audio prune failed", "err", err, "removed", n)
+			st.LogEvent("error", fmt.Sprintf("opruimen audio mislukt: %v", err))
+		}
+		if n > 0 {
+			slog.Info("pruned old audio", "removed", n, "older_than_days", days)
+			st.LogEvent("cleanup", fmt.Sprintf("%d opname(s) ouder dan %d dagen verwijderd", n, days))
+		}
+	}
+	prune()
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			prune()
+		}
+	}
 }

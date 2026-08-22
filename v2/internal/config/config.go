@@ -109,6 +109,10 @@ type Web struct {
 type Storage struct {
 	Database string `yaml:"database"`
 	AudioDir string `yaml:"audio_dir"`
+	// AudioRetentionDays is how long audio files are kept on disk. The
+	// voicemail itself (transcription, mail text) is kept forever; only the
+	// recording is removed. 0 disables pruning.
+	AudioRetentionDays int `yaml:"audio_retention_days"`
 }
 
 type Config struct {
@@ -155,8 +159,9 @@ func Load(path string) (*Config, error) {
 			Listen:  ":8080",
 		},
 		Storage: Storage{
-			Database: "data/voicemail.db",
-			AudioDir: "data/audio",
+			Database:           "data/voicemail.db",
+			AudioDir:           "data/audio",
+			AudioRetentionDays: 90,
 		},
 	}
 	if err := yaml.Unmarshal(raw, cfg); err != nil {

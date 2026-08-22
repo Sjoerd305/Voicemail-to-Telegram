@@ -127,9 +127,11 @@ func (s *Store) SaveVoicemail(vm *Voicemail) error {
 // id (Before), so a page stays stable while new voicemails arrive at the top.
 type ListOptions struct {
 	Limit  int
-	Before int64  // only voicemails with id < Before; 0 means from the newest
-	Query  string // case-insensitive substring match on transcription, subject and mail body
-	Done   *bool  // nil: all; true: handled only; false: open only
+	Before int64     // only voicemails with id < Before; 0 means from the newest
+	Query  string    // case-insensitive substring match on transcription, subject and mail body
+	Done   *bool     // nil: all; true: handled only; false: open only
+	Since  time.Time // received at or after; zero means no lower bound
+	Until  time.Time // received before; zero means no upper bound
 }
 
 type Page struct {
@@ -161,6 +163,15 @@ func (s *Store) ListVoicemails(opts ListOptions) (*Page, error) {
 		} else {
 			where = append(where, "done_at = ''")
 		}
+	}
+	// received_at is stored as UTC RFC3339, so string comparison orders by time.
+	if !opts.Since.IsZero() {
+		where = append(where, "received_at >= ?")
+		args = append(args, opts.Since.UTC().Format(time.RFC3339))
+	}
+	if !opts.Until.IsZero() {
+		where = append(where, "received_at < ?")
+		args = append(args, opts.Until.UTC().Format(time.RFC3339))
 	}
 	cond := strings.Join(where, " AND ")
 

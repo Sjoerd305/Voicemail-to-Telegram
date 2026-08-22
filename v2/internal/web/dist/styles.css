@@ -184,6 +184,13 @@ main {
 }
 .filters button.active { background: var(--card); color: var(--text); box-shadow: var(--shadow); }
 .filters button:hover:not(.active) { color: var(--text-2); }
+#period {
+  background: var(--card-2); color: var(--text-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: .35rem .5rem; font: inherit; font-size: .85rem;
+}
+#period:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+.vm .customer.clickable { cursor: pointer; }
+.vm .customer.clickable:hover { color: var(--accent); }
 #search {
   width: 220px;
   max-width: 55vw;

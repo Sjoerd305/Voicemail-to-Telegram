@@ -97,6 +97,7 @@ web:
 storage:
   database: /data/voicemail.db
   audio_dir: /data/audio
+  audio_retention_days: 90   # recordings older than this are deleted; text is kept forever (0 = keep audio forever)
 
 # Optional: free-form text appended below the dynamically generated /info
 # command list. The list itself is always built from this config.

@@ -72,6 +72,21 @@ let loadingMore = false;
 let currentAudio: HTMLAudioElement | null = null;
 let filter: Filter = 'all';
 let query = '';
+type Period = 'all' | 'today' | 'week' | 'month' | '90d';
+let period: Period = 'all';
+
+// Start of the selected period in the browser's local time, or null for all.
+function periodStart(): Date | null {
+  const now = new Date();
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  switch (period) {
+    case 'today': return day;
+    case 'week': return new Date(day.getTime() - ((now.getDay() + 6) % 7) * 86_400_000);
+    case 'month': return new Date(now.getFullYear(), now.getMonth(), 1);
+    case '90d': return new Date(day.getTime() - 90 * 86_400_000);
+    default: return null;
+  }
+}
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -474,7 +489,7 @@ function renderVoicemails(): void {
   const q = query.trim().toLowerCase();
   const shown = voicemails;
   if (shown.length === 0) {
-    const msg = q ? 'Geen resultaten voor deze zoekopdracht.'
+    const msg = q || period !== 'all' ? 'Geen resultaten voor deze zoekopdracht.'
       : filter === 'open' ? 'Geen open voicemails — alles is afgehandeld.'
       : filter === 'done' ? 'Nog niets afgehandeld.'
       : 'Nog geen voicemails ontvangen.';
@@ -497,8 +512,10 @@ function renderVoicemails(): void {
     if (customer || caller) {
       const row = el('div', 'title-row');
       if (customer) {
-        const title = el('span', 'customer');
+        const title = el('span', 'customer clickable');
         highlight(title, customer, q);
+        title.title = `Alle voicemails van ${customer} tonen`;
+        title.addEventListener('click', () => setSearch(customer));
         row.append(title);
       }
       if (caller) {
@@ -557,6 +574,8 @@ function listURL(limit: number, before = 0): string {
   if (query.trim()) p.set('q', query.trim());
   if (filter === 'open') p.set('done', 'false');
   if (filter === 'done') p.set('done', 'true');
+  const since = periodStart();
+  if (since) p.set('since', since.toISOString());
   if (before > 0) p.set('before', String(before));
   return `/api/voicemails?${p}`;
 }
@@ -764,6 +783,20 @@ $('#search').addEventListener('input', e => {
   query = (e.target as HTMLInputElement).value;
   clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => void reloadVoicemails(), 250);
+});
+
+function setSearch(text: string): void {
+  const input = $('#search') as HTMLInputElement;
+  input.value = text;
+  query = text;
+  clearTimeout(searchTimer);
+  void reloadVoicemails();
+  input.scrollIntoView({ block: 'nearest' });
+}
+
+$('#period').addEventListener('change', e => {
+  period = (e.target as HTMLSelectElement).value as Period;
+  void reloadVoicemails();
 });
 
 for (const btn of document.querySelectorAll<HTMLButtonElement>('#filters button')) {

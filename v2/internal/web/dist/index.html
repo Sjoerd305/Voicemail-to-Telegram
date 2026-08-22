@@ -46,6 +46,13 @@
             <button data-filter="open">Open</button>
             <button data-filter="done">Afgehandeld</button>
           </div>
+          <select id="period" aria-label="Periode">
+            <option value="all">Alle periodes</option>
+            <option value="today">Vandaag</option>
+            <option value="week">Deze week</option>
+            <option value="month">Deze maand</option>
+            <option value="90d">Laatste 90 dagen</option>
+          </select>
           <input id="search" type="search" placeholder="Zoeken…" aria-label="Zoeken in voicemails">
         </div>
         <div id="voicemails" class="voicemails"></div>

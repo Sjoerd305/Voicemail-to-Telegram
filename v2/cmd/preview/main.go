@@ -58,8 +58,8 @@ func main() {
 			at := now.AddDate(0, 0, -day).Add(-time.Duration(rng.Intn(600)) * time.Minute)
 			n++
 			vm := &store.Voicemail{
-				ReceivedAt:    at,
-				Subject:       fmt.Sprintf("PBX Voicemail van 06%08d", 10000000+rng.Intn(89999999)),
+				ReceivedAt: at,
+				Subject:    fmt.Sprintf("PBX Voicemail van 06%08d", 10000000+rng.Intn(89999999)),
 				EmailText: func() string {
 					num := fmt.Sprintf("06%08d", 10000000+rng.Intn(89999999))
 					return fmt.Sprintf("Nieuw voicemailbericht in mailbox 9001.\nKlantnaam: %s\nFrom:    %q <%s>\nDuur: 0:%02d",
