@@ -122,7 +122,9 @@ Open `http://host:8080`. Set `web.enabled: false` to turn it off entirely.
 `client_secret` and list who may log in under `allowed_domains` (email
 domains, or single addresses containing an `@`). Everything — pages and API —
 is then behind a login screen with one "Inloggen met Google" button. Sessions
-last 30 days and survive restarts.
+last 30 days and survive restarts. The login asks for the `openid`, `email`
+and `profile` scopes; the name from `profile` is what actions in the event log
+are attributed to ("/vivia by Sjoerd van Dijk (web): ...").
 
 Setup in the Google Cloud Console (APIs & Services → Credentials):
 1. Create an OAuth client ID of type "Web application".

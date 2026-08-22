@@ -192,3 +192,123 @@ func TestBasicAuth(t *testing.T) {
 		t.Fatalf("expected 200 with password, got %d", resp.StatusCode)
 	}
 }
+
+// A web action must be credited to the signed-in Google account, both in the
+// event log and in the Telegram announcement.
+func TestActionLogsSignedInUser(t *testing.T) {
+	pbx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	t.Cleanup(pbx.Close)
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	notifier := &fakeNotifier{}
+	ts, post := newSignedInTestServer(t, st, map[string]config.Command{
+		"testcmd": {Type: "http", URL: pbx.URL, Success: "Gelukt."},
+	}, notifier)
+
+	resp := post(t, ts.URL+"/api/actions/testcmd", "")
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("action status: %d", resp.StatusCode)
+	}
+
+	events, err := st.ListEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "/testcmd by Sjoerd van Dijk (web): Gelukt."
+	if len(events) == 0 || events[0].Detail != want {
+		t.Fatalf("event detail = %+v, want %q", events, want)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		notifier.mu.Lock()
+		msgs := append([]string(nil), notifier.messages...)
+		notifier.mu.Unlock()
+		if len(msgs) > 0 {
+			if msgs[0] != "Gelukt. (via web-UI door Sjoerd van Dijk)" {
+				t.Fatalf("unexpected announcement: %q", msgs[0])
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no telegram announcement sent")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// newSignedInTestServer builds a server behind Google auth and returns a post
+// helper that carries a valid session cookie, so tests can check what gets
+// attributed to the signed-in user.
+func newSignedInTestServer(t *testing.T, st *store.Store, commands map[string]config.Command, notifier Notifier) (*httptest.Server, func(*testing.T, string, string) *http.Response) {
+	t.Helper()
+	webCfg := config.Web{
+		PublicURL: "http://voicemail.local:8080",
+		GoogleAuth: config.GoogleAuth{
+			ClientID: "id", ClientSecret: "secret", AllowedDomains: []string{"smvd.net"},
+		},
+	}
+	cfg := &config.Config{Web: webCfg, Commands: commands}
+	srv := NewServer(cfg, st, actions.New(cfg), mailer.NewWatcher(cfg, st, nil, nil), notifier)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	sess := httptest.NewRecorder()
+	newGoogleAuth(webCfg).setSession(sess, sessionUser{Email: "sjoerd@smvd.net", Name: "Sjoerd van Dijk"})
+	post := func(t *testing.T, url, body string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest("POST", url, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range sess.Result().Cookies() {
+			req.AddCookie(c)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			t.Fatalf("POST %s: status %d", url, resp.StatusCode)
+		}
+		return resp
+	}
+	return ts, post
+}
+
+// Marking a voicemail done is credited to the signed-in account too.
+func TestSetDoneLogsSignedInUser(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	vm := &store.Voicemail{ReceivedAt: time.Now(), Subject: "PBX test", MessageID: "<done@example.com>"}
+	if err := st.SaveVoicemail(vm); err != nil {
+		t.Fatal(err)
+	}
+
+	ts, post := newSignedInTestServer(t, st, nil, nil)
+	url := fmt.Sprintf("%s/api/voicemails/%d/done", ts.URL, vm.ID)
+
+	for _, tc := range []struct{ body, want string }{
+		{`{"done":true}`, fmt.Sprintf("voicemail #%d afgehandeld door Sjoerd van Dijk", vm.ID)},
+		{`{"done":false}`, fmt.Sprintf("voicemail #%d heropend door Sjoerd van Dijk", vm.ID)},
+	} {
+		post(t, url, tc.body).Body.Close()
+		events, err := st.ListEvents(10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) == 0 || events[0].Detail != tc.want {
+			t.Fatalf("event detail = %+v, want %q", events, tc.want)
+		}
+	}
+}

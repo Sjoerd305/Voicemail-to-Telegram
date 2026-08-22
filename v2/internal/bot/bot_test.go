@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
 	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
 )
 
@@ -54,5 +56,24 @@ func TestInfoMessageMinimalConfig(t *testing.T) {
 	msg := b.infoMessage()
 	if !strings.Contains(msg, "/info") || strings.Contains(msg, "Klantinfo") {
 		t.Errorf("unexpected minimal info message:\n%s", msg)
+	}
+}
+
+func TestSenderName(t *testing.T) {
+	cases := []struct {
+		user *tgbotapi.User
+		want string
+	}{
+		{&tgbotapi.User{FirstName: "Sjoerd", LastName: "van Dijk", UserName: "sjoerd305"}, "Sjoerd van Dijk"},
+		{&tgbotapi.User{FirstName: "Sjoerd"}, "Sjoerd"},
+		// No name set at all: fall back to the @handle instead of "".
+		{&tgbotapi.User{UserName: "sjoerd305"}, "@sjoerd305"},
+		{&tgbotapi.User{}, "onbekend"},
+		{nil, "onbekend"},
+	}
+	for _, c := range cases {
+		if got := senderName(c.user); got != c.want {
+			t.Errorf("senderName(%+v) = %q, want %q", c.user, got, c.want)
+		}
 	}
 }

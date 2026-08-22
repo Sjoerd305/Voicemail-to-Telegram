@@ -161,10 +161,14 @@ func (s *Server) handleSetDone(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	what := "heropend"
 	if body.Done {
-		s.store.LogEvent("done", fmt.Sprintf("voicemail #%d afgehandeld", id))
+		what = "afgehandeld"
+	}
+	if actor, ok := userFromRequest(r); ok {
+		s.store.LogEvent("done", fmt.Sprintf("voicemail #%d %s door %s", id, what, actor.DisplayName()))
 	} else {
-		s.store.LogEvent("done", fmt.Sprintf("voicemail #%d heropend", id))
+		s.store.LogEvent("done", fmt.Sprintf("voicemail #%d %s", id, what))
 	}
 	writeJSON(w, vm)
 }
@@ -190,13 +194,21 @@ func (s *Server) handleRunAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown action", http.StatusNotFound)
 		return
 	}
-	s.store.LogEvent("command", "web: "+name+": "+msg)
+	// Attribute the action to the signed-in Google account, matching the
+	// "/cmd by <name>" lines the Telegram side writes.
+	via := " (via web-UI)"
+	if actor, ok := userFromRequest(r); ok {
+		s.store.LogEvent("command", fmt.Sprintf("/%s by %s (web): %s", name, actor.DisplayName(), msg))
+		via = " (via web-UI door " + actor.DisplayName() + ")"
+	} else {
+		s.store.LogEvent("command", fmt.Sprintf("/%s via web-UI: %s", name, msg))
+	}
 	// Announce the result in the Telegram group so web actions are just as
 	// visible to the team as chat commands. Async: Telegram latency or
 	// retries should not delay the HTTP response.
 	if s.notifier != nil {
 		go func() {
-			if err := s.notifier.SendMessage(msg + " (via web-UI)"); err != nil {
+			if err := s.notifier.SendMessage(msg + via); err != nil {
 				slog.Error("failed to announce web action in telegram", "action", name, "err", err)
 			}
 		}()

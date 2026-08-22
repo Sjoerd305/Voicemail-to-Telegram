@@ -113,7 +113,8 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 	cmd := strings.ToLower(msg.Command())
-	slog.Info("received command", "command", cmd, "from", msg.From.UserName)
+	sender := senderName(msg.From)
+	slog.Info("received command", "command", cmd, "from", sender)
 
 	switch cmd {
 	case "info":
@@ -128,7 +129,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 	}
 
 	if result, _, found := b.runner.Run(ctx, cmd); found {
-		b.store.LogEvent("command", fmt.Sprintf("/%s by %s: %s", cmd, msg.From.UserName, result))
+		b.store.LogEvent("command", fmt.Sprintf("/%s by %s: %s", cmd, sender, result))
 		b.reply(msg, result)
 		return
 	}
@@ -139,6 +140,23 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 	b.reply(msg, "Onbekend commando, zie /info")
+}
+
+// senderName is who to credit for a command. A Telegram @username is
+// optional, so relying on it alone left the event log reading "by "; the
+// first/last name is always present and matches the real names the web UI
+// gets from Google.
+func senderName(u *tgbotapi.User) string {
+	if u == nil {
+		return "onbekend"
+	}
+	if name := strings.TrimSpace(u.FirstName + " " + u.LastName); name != "" {
+		return name
+	}
+	if u.UserName != "" {
+		return "@" + u.UserName
+	}
+	return "onbekend"
 }
 
 // phoneCommandList lists the generated command for every configured phone
@@ -253,4 +271,3 @@ func (b *Bot) reply(msg *tgbotapi.Message, text string) {
 		slog.Error("failed to send reply", "err", err)
 	}
 }
-

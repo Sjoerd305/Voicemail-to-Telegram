@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -27,6 +28,41 @@ const (
 	sessionTTL    = 30 * 24 * time.Hour
 )
 
+// sessionUser is the signed-in account behind a request.
+type sessionUser struct {
+	Email string
+	Name  string // full name from Google; empty for sessions issued before the profile scope
+}
+
+// DisplayName is what we show in the event log. Google gives us the real
+// name via the profile scope; sessions from before that (and accounts
+// without a name) fall back to a prettified email local part.
+func (u sessionUser) DisplayName() string {
+	if u.Name != "" {
+		return u.Name
+	}
+	local, _, _ := strings.Cut(u.Email, "@")
+	local = strings.NewReplacer(".", " ", "_", " ", "-", " ").Replace(local)
+	fields := strings.Fields(local)
+	for i, f := range fields {
+		fields[i] = strings.ToUpper(f[:1]) + f[1:]
+	}
+	if len(fields) == 0 {
+		return u.Email
+	}
+	return strings.Join(fields, " ")
+}
+
+type userCtxKey struct{}
+
+// userFromRequest returns the signed-in user, if the request passed through
+// the Google auth middleware. It is empty for basic-auth and unauthenticated
+// setups.
+func userFromRequest(r *http.Request) (sessionUser, bool) {
+	u, ok := r.Context().Value(userCtxKey{}).(sessionUser)
+	return u, ok
+}
+
 // googleAuth protects the whole UI behind a Google sign-in. Sessions are
 // HMAC-signed cookies; the signing key is derived from the client secret so
 // sessions survive restarts without extra configuration.
@@ -52,7 +88,7 @@ func (a *googleAuth) oauthConfig() *oauth2.Config {
 		ClientID:     a.cfg.ClientID,
 		ClientSecret: a.cfg.ClientSecret,
 		RedirectURL:  a.public + "/auth/callback",
-		Scopes:       []string{"openid", "email"},
+		Scopes:       []string{"openid", "email", "profile"},
 		Endpoint:     google.Endpoint,
 	}
 }
@@ -71,8 +107,8 @@ func (a *googleAuth) middleware(next http.Handler) http.Handler {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		if _, ok := a.session(r); ok {
-			next.ServeHTTP(w, r)
+		if user, ok := a.session(r); ok {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtxKey{}, user)))
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/api/") {
@@ -122,41 +158,47 @@ func (a *googleAuth) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	idToken, _ := tok.Extra("id_token").(string)
-	email, verified, err := parseIDToken(idToken)
+	user, verified, err := parseIDToken(idToken)
 	if err != nil || !verified {
 		fail("failed")
 		return
 	}
-	if !a.emailAllowed(email) {
-		slog.Warn("login from disallowed account", "email", email)
+	if !a.emailAllowed(user.Email) {
+		slog.Warn("login from disallowed account", "email", user.Email)
 		fail("domain")
 		return
 	}
-	a.setSession(w, email)
-	slog.Info("user logged in", "email", email)
+	a.setSession(w, user)
+	slog.Info("user logged in", "email", user.Email, "name", user.Name)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 // parseIDToken extracts the claims we need from a Google id_token. The token
 // comes straight from Google's token endpoint over TLS, so decoding without
 // signature verification is safe here.
-func parseIDToken(idToken string) (email string, verified bool, err error) {
+func parseIDToken(idToken string) (user sessionUser, verified bool, err error) {
 	parts := strings.Split(idToken, ".")
 	if len(parts) != 3 {
-		return "", false, fmt.Errorf("malformed id_token")
+		return sessionUser{}, false, fmt.Errorf("malformed id_token")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", false, err
+		return sessionUser{}, false, err
 	}
 	var claims struct {
 		Email         string `json:"email"`
 		EmailVerified bool   `json:"email_verified"`
+		Name          string `json:"name"`
+		GivenName     string `json:"given_name"`
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return "", false, err
+		return sessionUser{}, false, err
 	}
-	return strings.ToLower(claims.Email), claims.EmailVerified, nil
+	name := strings.TrimSpace(claims.Name)
+	if name == "" {
+		name = strings.TrimSpace(claims.GivenName)
+	}
+	return sessionUser{Email: strings.ToLower(claims.Email), Name: name}, claims.EmailVerified, nil
 }
 
 // emailAllowed checks the account against allowed_domains. Entries may be a
@@ -193,9 +235,13 @@ func (a *googleAuth) sign(payload string) string {
 		base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (a *googleAuth) setSession(w http.ResponseWriter, email string) {
+// setSession stores the account in a signed cookie. The payload is
+// "email|name|expiry"; the name may be empty and never contains a "|"
+// (Google names can't) so the fields stay unambiguous.
+func (a *googleAuth) setSession(w http.ResponseWriter, user sessionUser) {
 	exp := time.Now().Add(sessionTTL)
-	value := a.sign(email + "|" + strconv.FormatInt(exp.Unix(), 10))
+	name := strings.ReplaceAll(user.Name, "|", " ")
+	value := a.sign(user.Email + "|" + name + "|" + strconv.FormatInt(exp.Unix(), 10))
 	// #nosec G124 -- HttpOnly and SameSite are set; Secure follows the public_url scheme (off for plain-http LAN setups).
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: value, Path: "/",
@@ -211,38 +257,42 @@ func (a *googleAuth) clearSession(w http.ResponseWriter) {
 	})
 }
 
-// session validates the cookie and returns the logged-in email.
-func (a *googleAuth) session(r *http.Request) (string, bool) {
+// session validates the cookie and returns the logged-in user. Cookies
+// issued before the name was stored have only "email|expiry"; they stay
+// valid and fall back to the email-derived display name.
+func (a *googleAuth) session(r *http.Request) (sessionUser, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return "", false
+		return sessionUser{}, false
 	}
 	dot := strings.LastIndex(c.Value, ".")
 	if dot < 0 {
-		return "", false
+		return sessionUser{}, false
 	}
 	payloadRaw, err := base64.RawURLEncoding.DecodeString(c.Value[:dot])
 	if err != nil {
-		return "", false
+		return sessionUser{}, false
 	}
 	if a.sign(string(payloadRaw)) != c.Value {
-		return "", false
+		return sessionUser{}, false
 	}
-	payload := string(payloadRaw)
-	sep := strings.LastIndex(payload, "|")
-	if sep < 0 {
-		return "", false
+	fields := strings.Split(string(payloadRaw), "|")
+	if len(fields) < 2 {
+		return sessionUser{}, false
 	}
-	expUnix, err := strconv.ParseInt(payload[sep+1:], 10, 64)
+	expUnix, err := strconv.ParseInt(fields[len(fields)-1], 10, 64)
 	if err != nil || time.Now().Unix() > expUnix {
-		return "", false
+		return sessionUser{}, false
 	}
-	email := payload[:sep]
-	if !a.emailAllowed(email) {
+	user := sessionUser{Email: fields[0]}
+	if len(fields) > 2 {
+		user.Name = strings.Join(fields[1:len(fields)-1], "|")
+	}
+	if !a.emailAllowed(user.Email) {
 		// Domain list changed since the cookie was issued.
-		return "", false
+		return sessionUser{}, false
 	}
-	return email, true
+	return user, true
 }
 
 // --- login page -------------------------------------------------------------

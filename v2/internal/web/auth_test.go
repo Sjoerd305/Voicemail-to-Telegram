@@ -4,8 +4,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
 )
@@ -42,15 +44,15 @@ func TestEmailAllowed(t *testing.T) {
 func TestSessionRoundTrip(t *testing.T) {
 	a := testAuth()
 	rec := httptest.NewRecorder()
-	a.setSession(rec, "sjoerd@smvd.net")
+	a.setSession(rec, sessionUser{Email: "sjoerd@smvd.net", Name: "Sjoerd van Dijk"})
 
 	req := httptest.NewRequest("GET", "/", nil)
 	for _, c := range rec.Result().Cookies() {
 		req.AddCookie(c)
 	}
-	email, ok := a.session(req)
-	if !ok || email != "sjoerd@smvd.net" {
-		t.Fatalf("session not accepted: %q %v", email, ok)
+	user, ok := a.session(req)
+	if !ok || user.Email != "sjoerd@smvd.net" || user.Name != "Sjoerd van Dijk" {
+		t.Fatalf("session not accepted: %+v %v", user, ok)
 	}
 
 	// Tampered cookie must be rejected.
@@ -93,7 +95,7 @@ func TestMiddlewareBlocksAnonymous(t *testing.T) {
 
 	// With a valid session everything passes.
 	sess := httptest.NewRecorder()
-	a.setSession(sess, "sjoerd@smvd.net")
+	a.setSession(sess, sessionUser{Email: "sjoerd@smvd.net", Name: "Sjoerd van Dijk"})
 	req := httptest.NewRequest("GET", "/api/voicemails", nil)
 	for _, c := range sess.Result().Cookies() {
 		req.AddCookie(c)
@@ -119,5 +121,39 @@ func TestLoginRedirectsToGoogle(t *testing.T) {
 	}
 	if len(rec.Result().Cookies()) == 0 {
 		t.Fatal("no state cookie set")
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	cases := []struct {
+		user sessionUser
+		want string
+	}{
+		{sessionUser{Email: "sjoerd@smvd.net", Name: "Sjoerd van Dijk"}, "Sjoerd van Dijk"},
+		// Sessions issued before the profile scope carry no name.
+		{sessionUser{Email: "sjoerd.van.dijk@smvd.net"}, "Sjoerd Van Dijk"},
+		{sessionUser{Email: "sjoerd@smvd.net"}, "Sjoerd"},
+		{sessionUser{Email: "@smvd.net"}, "@smvd.net"},
+	}
+	for _, c := range cases {
+		if got := c.user.DisplayName(); got != c.want {
+			t.Errorf("DisplayName(%+v) = %q, want %q", c.user, got, c.want)
+		}
+	}
+}
+
+// Cookies minted before the name was part of the payload must keep working.
+func TestSessionAcceptsLegacyCookie(t *testing.T) {
+	a := testAuth()
+	exp := strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: a.sign("sjoerd@smvd.net|" + exp)})
+
+	user, ok := a.session(req)
+	if !ok || user.Email != "sjoerd@smvd.net" || user.Name != "" {
+		t.Fatalf("legacy session not accepted: %+v %v", user, ok)
+	}
+	if got := user.DisplayName(); got != "Sjoerd" {
+		t.Fatalf("legacy display name = %q", got)
 	}
 }
