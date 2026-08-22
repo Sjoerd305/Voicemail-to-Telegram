@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -122,18 +123,66 @@ func (s *Store) SaveVoicemail(vm *Voicemail) error {
 	return err
 }
 
-func (s *Store) ListVoicemails(limit int) ([]Voicemail, error) {
-	if limit <= 0 || limit > 500 {
-		limit = 100
+// ListOptions selects a page of voicemails. Paging is cursor based on the
+// id (Before), so a page stays stable while new voicemails arrive at the top.
+type ListOptions struct {
+	Limit  int
+	Before int64  // only voicemails with id < Before; 0 means from the newest
+	Query  string // case-insensitive substring match on transcription, subject and mail body
+	Done   *bool  // nil: all; true: handled only; false: open only
+}
+
+type Page struct {
+	Items   []Voicemail `json:"items"`
+	Total   int         `json:"total"`    // matches for Query/Done, ignoring Before
+	HasMore bool        `json:"has_more"` // older matches exist beyond this page
+}
+
+const (
+	DefaultPageSize = 10
+	MaxPageSize     = 500
+)
+
+func (s *Store) ListVoicemails(opts ListOptions) (*Page, error) {
+	limit := opts.Limit
+	if limit <= 0 || limit > MaxPageSize {
+		limit = DefaultPageSize
 	}
+	where := []string{"1=1"}
+	args := []any{}
+	if q := strings.TrimSpace(opts.Query); q != "" {
+		pat := "%" + escapeLike(q) + "%"
+		where = append(where, `(transcription LIKE ? ESCAPE '\' OR subject LIKE ? ESCAPE '\' OR email_text LIKE ? ESCAPE '\')`)
+		args = append(args, pat, pat, pat)
+	}
+	if opts.Done != nil {
+		if *opts.Done {
+			where = append(where, "done_at != ''")
+		} else {
+			where = append(where, "done_at = ''")
+		}
+	}
+	cond := strings.Join(where, " AND ")
+
+	page := &Page{Items: []Voicemail{}}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM voicemails WHERE `+cond, args...).Scan(&page.Total); err != nil {
+		return nil, err
+	}
+
+	pageArgs := append([]any{}, args...)
+	if opts.Before > 0 {
+		cond += " AND id < ?"
+		pageArgs = append(pageArgs, opts.Before)
+	}
+	// Fetch one extra row to learn whether another page exists.
+	pageArgs = append(pageArgs, limit+1)
 	rows, err := s.db.Query(
 		`SELECT id, received_at, subject, email_text, transcription, audio_path, done_at
-		 FROM voicemails ORDER BY id DESC LIMIT ?`, limit)
+		 FROM voicemails WHERE `+cond+` ORDER BY id DESC LIMIT ?`, pageArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []Voicemail{}
 	for rows.Next() {
 		var vm Voicemail
 		var at, doneAt string
@@ -143,9 +192,85 @@ func (s *Store) ListVoicemails(limit int) ([]Voicemail, error) {
 		vm.ReceivedAt, _ = time.Parse(time.RFC3339, at)
 		vm.HasAudio = vm.AudioPath != ""
 		vm.setDone(doneAt)
-		out = append(out, vm)
+		page.Items = append(page.Items, vm)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		page.HasMore = true
+	}
+	return page, nil
+}
+
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// Stats are the dashboard counters. Days holds the last 14 calendar days in
+// the server's local timezone, oldest first.
+type Stats struct {
+	Open  int        `json:"open"`
+	Today int        `json:"today"`
+	Week  int        `json:"week"`
+	Days  []DayCount `json:"days"`
+}
+
+type DayCount struct {
+	Date  string `json:"date"` // YYYY-MM-DD
+	Count int    `json:"count"`
+}
+
+const statsDays = 14
+
+func (s *Store) Stats(now time.Time) (*Stats, error) {
+	st := &Stats{}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM voicemails WHERE done_at = ''`).Scan(&st.Open); err != nil {
+		return nil, err
+	}
+	now = now.In(time.Local)
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+	// ISO week starts on Monday.
+	startOfWeek := startOfDay.AddDate(0, 0, -((int(now.Weekday()) + 6) % 7))
+	firstDay := startOfDay.AddDate(0, 0, -(statsDays - 1))
+	st.Days = make([]DayCount, statsDays)
+	for i := range st.Days {
+		st.Days[i].Date = firstDay.AddDate(0, 0, i).Format("2006-01-02")
+	}
+	// received_at is stored as UTC RFC3339, so string comparison orders by time.
+	since := firstDay.UTC()
+	if startOfWeek.Before(firstDay) {
+		since = startOfWeek.UTC()
+	}
+	rows, err := s.db.Query(`SELECT received_at FROM voicemails WHERE received_at >= ?`, since.Format(time.RFC3339))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var at string
+		if err := rows.Scan(&at); err != nil {
+			return nil, err
+		}
+		t, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			continue
+		}
+		t = t.In(time.Local)
+		if !t.Before(startOfDay) {
+			st.Today++
+		}
+		if !t.Before(startOfWeek) {
+			st.Week++
+		}
+		day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
+		if idx := int(day.Sub(firstDay).Hours() / 24); idx >= 0 && idx < statsDays {
+			st.Days[idx].Count++
+		}
+	}
+	return st, rows.Err()
 }
 
 func (vm *Voicemail) setDone(doneAt string) {

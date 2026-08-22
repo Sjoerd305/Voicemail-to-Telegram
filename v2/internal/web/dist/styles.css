@@ -361,6 +361,14 @@ main {
 .toast.err { border-left-color: var(--err); }
 
 .empty { color: var(--muted); font-size: .88rem; padding: 1.2rem 0; text-align: center; }
+.load-more {
+  display: flex; align-items: center; justify-content: center; gap: .4rem;
+  width: 100%; padding: .6rem; margin-top: .25rem;
+  background: var(--card-2); color: var(--text-2); border: 1px dashed var(--border);
+  border-radius: 10px; font: inherit; font-size: .88rem; cursor: pointer;
+}
+.load-more:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.load-more:disabled { opacity: .6; cursor: default; }
 
 /* ---- touch devices / small screens ---- */
 @media (max-width: 640px) {

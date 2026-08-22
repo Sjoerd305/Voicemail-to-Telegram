@@ -110,15 +110,15 @@ func TestAPIEndpoints(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("voicemails status: %d", resp.StatusCode)
 	}
-	var vms []store.Voicemail
-	if err := json.NewDecoder(resp.Body).Decode(&vms); err != nil {
+	var page store.Page
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
 		t.Fatal(err)
 	}
-	if len(vms) != 1 || vms[0].Transcription != "hallo dit is een test" {
-		t.Fatalf("unexpected voicemails: %+v", vms)
+	if len(page.Items) != 1 || page.Total != 1 || page.HasMore || page.Items[0].Transcription != "hallo dit is een test" {
+		t.Fatalf("unexpected voicemails page: %+v", page)
 	}
 
-	for _, path := range []string{"/api/status", "/api/events", "/api/actions", "/"} {
+	for _, path := range []string{"/api/status", "/api/stats", "/api/events", "/api/actions", "/"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatal(err)

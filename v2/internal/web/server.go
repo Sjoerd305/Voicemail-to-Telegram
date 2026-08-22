@@ -46,6 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/voicemails", s.handleListVoicemails)
+	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/voicemails/{id}/audio", s.handleAudio)
 	mux.HandleFunc("POST /api/voicemails/{id}/done", s.handleSetDone)
 	mux.HandleFunc("GET /api/events", s.handleListEvents)
@@ -105,13 +106,33 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListVoicemails(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	vms, err := s.store.ListVoicemails(limit)
+	q := r.URL.Query()
+	opts := store.ListOptions{Query: q.Get("q")}
+	opts.Limit, _ = strconv.Atoi(q.Get("limit"))
+	opts.Before, _ = strconv.ParseInt(q.Get("before"), 10, 64)
+	switch q.Get("done") {
+	case "true", "1":
+		t := true
+		opts.Done = &t
+	case "false", "0":
+		f := false
+		opts.Done = &f
+	}
+	page, err := s.store.ListVoicemails(opts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, vms)
+	writeJSON(w, page)
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	st, err := s.store.Stats(time.Now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, st)
 }
 
 func (s *Server) handleAudio(w http.ResponseWriter, r *http.Request) {

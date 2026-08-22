@@ -2,7 +2,7 @@ import {
   createElement, type IconNode,
   Voicemail as VoicemailIcon, Phone, PhoneForwarded, Wrench, Play, Pause,
   Download, Check, Archive, Rocket, TriangleAlert, CircleCheck, Inbox, Trash2,
-  ChevronRight, LogOut,
+  ChevronRight, ChevronDown, LogOut,
 } from 'lucide';
 
 function icon(node: IconNode, size = 16): SVGElement {
@@ -48,9 +48,30 @@ interface Status {
   auth_enabled: boolean;
 }
 
+interface Page {
+  items: Voicemail[];
+  total: number;
+  has_more: boolean;
+}
+
+interface Stats {
+  open: number;
+  today: number;
+  week: number;
+  days: { date: string; count: number }[];
+}
+
+// Only a handful of voicemails are ever relevant at once: storingen are picked
+// up right away. Older ones are fetched on demand via "Meer laden".
+const PAGE_SIZE = 10;
+
 let voicemails: Voicemail[] = [];
+let total = 0;
+let hasMore = false;
+let loadingMore = false;
 let currentAudio: HTMLAudioElement | null = null;
 let filter: Filter = 'all';
+let query = '';
 
 const $ = <T extends HTMLElement>(sel: string): T => {
   const el = document.querySelector<T>(sel);
@@ -165,22 +186,21 @@ async function refreshStatus(): Promise<void> {
   }
 }
 
-function refreshStats(): void {
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  // ISO week starts on Monday.
-  const dow = (now.getDay() + 6) % 7;
-  const startOfWeek = startOfDay - dow * 86_400_000;
-  let today = 0;
-  let week = 0;
-  for (const vm of voicemails) {
-    const t = new Date(vm.received_at).getTime();
-    if (t >= startOfDay) today++;
-    if (t >= startOfWeek) week++;
+let stats: Stats | null = null;
+
+async function refreshStats(): Promise<void> {
+  try {
+    stats = await getJSON<Stats>('/api/stats');
+  } catch (e) {
+    console.error('failed to load stats', e);
+    return;
   }
-  $('#stat-today .stat-value').textContent = String(today);
-  $('#stat-week .stat-value').textContent = String(week);
-  $('#stat-open .stat-value').textContent = String(voicemails.filter(vm => !vm.done).length);
+  $('#stat-today .stat-value').textContent = String(stats.today);
+  $('#stat-week .stat-value').textContent = String(stats.week);
+  $('#stat-open .stat-value').textContent = String(stats.open);
+  const btn = document.querySelector<HTMLButtonElement>('#filters [data-filter="open"]');
+  if (btn) btn.textContent = stats.open > 0 ? `Open (${stats.open})` : 'Open';
+  renderChart();
 }
 
 // --- chart ------------------------------------------------------------------
@@ -204,20 +224,15 @@ function renderChart(): void {
   const tooltip = $('#tooltip');
   box.replaceChildren();
 
-  const DAYS = 14;
-  const now = new Date();
-  const counts: number[] = new Array(DAYS).fill(0);
-  const labels: Date[] = [];
-  for (let i = 0; i < DAYS; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (DAYS - 1 - i));
-    labels.push(d);
-  }
-  const start = labels[0].getTime();
-  for (const vm of voicemails) {
-    const t = new Date(vm.received_at).getTime();
-    const idx = Math.floor((t - start) / 86_400_000);
-    if (idx >= 0 && idx < DAYS) counts[idx]++;
-  }
+  const days = stats?.days ?? [];
+  const DAYS = days.length;
+  if (DAYS === 0) return;
+  const counts = days.map(d => d.count);
+  // Dates are YYYY-MM-DD in the server's timezone; parse as local calendar days.
+  const labels = days.map(d => {
+    const [y, m, dd] = d.date.split('-').map(Number);
+    return new Date(y, m - 1, dd);
+  });
 
   const W = Math.max(box.clientWidth, 320);
   const H = 132;
@@ -411,10 +426,11 @@ async function setDone(vm: Voicemail, done: boolean, btn: HTMLButtonElement): Pr
     const updated = (await res.json()) as Voicemail;
     const idx = voicemails.findIndex(v => v.id === updated.id);
     if (idx !== -1) voicemails[idx] = updated;
-    renderVoicemails(($('#search') as HTMLInputElement).value);
-    refreshStats();
-    updateFilterCounts();
+    renderVoicemails();
+    void refreshStats();
     void refreshEvents();
+    // Under the Open/Afgehandeld filter the item no longer belongs here.
+    if (filter !== 'all') void refreshVoicemails();
   } catch {
     toast(`Bijwerken van #${vm.id} mislukt.`, false);
     btn.disabled = false;
@@ -452,18 +468,11 @@ function extractCaller(emailText: string): string {
   return angled ? angled[1].trim() : '';
 }
 
-function renderVoicemails(query: string): void {
+function renderVoicemails(): void {
   const box = $('#voicemails');
   box.replaceChildren();
   const q = query.trim().toLowerCase();
-  const shown = voicemails.filter(vm => {
-    if (filter === 'open' && vm.done) return false;
-    if (filter === 'done' && !vm.done) return false;
-    return !q ||
-      vm.transcription.toLowerCase().includes(q) ||
-      vm.subject.toLowerCase().includes(q) ||
-      vm.email_text.toLowerCase().includes(q);
-  });
+  const shown = voicemails;
   if (shown.length === 0) {
     const msg = q ? 'Geen resultaten voor deze zoekopdracht.'
       : filter === 'open' ? 'Geen open voicemails — alles is afgehandeld.'
@@ -529,23 +538,68 @@ function renderVoicemails(query: string): void {
     if (vm.has_audio) card.append(buildPlayer(vm));
     box.append(card);
   }
+
+  const remaining = total - voicemails.length;
+  if (hasMore && remaining > 0) {
+    const more = document.createElement('button');
+    more.className = 'load-more';
+    more.append(icon(ChevronDown, 15), `Meer laden (nog ${remaining})`);
+    more.disabled = loadingMore;
+    more.addEventListener('click', () => void loadMore());
+    box.append(more);
+  } else if (voicemails.length > PAGE_SIZE) {
+    box.append(el('div', 'empty', `Alle ${total} voicemails geladen.`));
+  }
 }
 
-function updateFilterCounts(): void {
-  const open = voicemails.filter(vm => !vm.done).length;
-  const btn = document.querySelector<HTMLButtonElement>('#filters [data-filter="open"]');
-  if (btn) btn.textContent = open > 0 ? `Open (${open})` : 'Open';
+function listURL(limit: number, before = 0): string {
+  const p = new URLSearchParams({ limit: String(limit) });
+  if (query.trim()) p.set('q', query.trim());
+  if (filter === 'open') p.set('done', 'false');
+  if (filter === 'done') p.set('done', 'true');
+  if (before > 0) p.set('before', String(before));
+  return `/api/voicemails?${p}`;
 }
 
+// Reloads the list from the top. Keeps as many items loaded as the user had
+// expanded to, so the periodic refresh does not collapse "Meer laden" pages.
 async function refreshVoicemails(): Promise<void> {
+  const limit = Math.min(500, Math.max(PAGE_SIZE, voicemails.length));
+  const url = listURL(limit);
   try {
-    voicemails = await getJSON<Voicemail[]>('/api/voicemails?limit=500');
-    renderVoicemails(($('#search') as HTMLInputElement).value);
-    refreshStats();
-    updateFilterCounts();
-    renderChart();
+    const page = await getJSON<Page>(url);
+    // A newer request (typing in the search box) may have superseded this one.
+    if (url !== listURL(limit)) return;
+    voicemails = page.items;
+    total = page.total;
+    hasMore = page.has_more;
+    renderVoicemails();
   } catch (e) {
     console.error('failed to load voicemails', e);
+  }
+}
+
+// Called when search or filter changes: start over with a single page.
+async function reloadVoicemails(): Promise<void> {
+  voicemails = [];
+  await refreshVoicemails();
+}
+
+async function loadMore(): Promise<void> {
+  if (loadingMore || voicemails.length === 0) return;
+  loadingMore = true;
+  renderVoicemails();
+  try {
+    const page = await getJSON<Page>(listURL(PAGE_SIZE, voicemails[voicemails.length - 1].id));
+    voicemails.push(...page.items);
+    total = page.total;
+    hasMore = page.has_more;
+  } catch (e) {
+    console.error('failed to load more voicemails', e);
+    toast('Ouder laden mislukt.', false);
+  } finally {
+    loadingMore = false;
+    renderVoicemails();
   }
 }
 
@@ -705,15 +759,18 @@ async function refreshEvents(): Promise<void> {
 $('.brand-icon').append(icon(VoicemailIcon, 22));
 $('#logout').append(icon(LogOut, 15));
 
-$('#search').addEventListener('input', e =>
-  renderVoicemails((e.target as HTMLInputElement).value),
-);
+let searchTimer = 0;
+$('#search').addEventListener('input', e => {
+  query = (e.target as HTMLInputElement).value;
+  clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => void reloadVoicemails(), 250);
+});
 
 for (const btn of document.querySelectorAll<HTMLButtonElement>('#filters button')) {
   btn.addEventListener('click', () => {
     filter = (btn.dataset.filter ?? 'all') as Filter;
     for (const b of document.querySelectorAll('#filters button')) b.classList.toggle('active', b === btn);
-    renderVoicemails(($('#search') as HTMLInputElement).value);
+    void reloadVoicemails();
   });
 }
 
@@ -725,11 +782,13 @@ window.addEventListener('resize', () => {
 
 void loadActions();
 void refreshStatus();
+void refreshStats();
 void refreshVoicemails();
 void refreshEvents();
 
 setInterval(() => {
   void refreshStatus();
+  void refreshStats();
   void refreshVoicemails();
   void refreshEvents();
 }, 30_000);
