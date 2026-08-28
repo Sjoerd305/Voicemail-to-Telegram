@@ -57,3 +57,32 @@ func (s *Store) PruneAudio(before time.Time) (int, error) {
 	}
 	return removed, firstErr
 }
+
+// AutoDone marks every still-open voicemail received longer than window ago
+// as afgehandeld, and reports how many it closed. This is display state only:
+// no PBX command is run and nothing is deleted. On weekdays the meldingen are
+// picked up by a party that does not use the dashboard, so without this sweep
+// the open list grows forever; anyone can still reopen a voicemail from the
+// web UI, after which it stays open for good (SetDone sets reopened).
+//
+// done_at is set to received_at + window — the moment the voicemail aged out,
+// not the moment the sweep happened — so closing a backlog leaves timestamps
+// that still say something.
+func (s *Store) AutoDone(now time.Time, window time.Duration) (int, error) {
+	if window <= 0 {
+		return 0, nil
+	}
+	cutoff := now.Add(-window).UTC().Format(time.RFC3339)
+	// received_at is UTC RFC3339, which SQLite's date functions parse and
+	// string comparison orders by time.
+	res, err := s.db.Exec(
+		`UPDATE voicemails
+		    SET done_at = strftime('%Y-%m-%dT%H:%M:%SZ', received_at, ?), done_auto = 1
+		  WHERE done_at = '' AND reopened = 0 AND received_at < ?`,
+		fmt.Sprintf("+%d seconds", int64(window/time.Second)), cutoff)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}

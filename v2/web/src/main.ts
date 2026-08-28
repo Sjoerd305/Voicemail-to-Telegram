@@ -23,6 +23,7 @@ interface Voicemail {
   has_audio: boolean;
   done: boolean;
   done_at?: string;
+  done_auto?: boolean;
 }
 
 type Filter = 'all' | 'open' | 'done';
@@ -455,10 +456,13 @@ async function setDone(vm: Voicemail, done: boolean, btn: HTMLButtonElement): Pr
 function doneButton(vm: Voicemail): HTMLButtonElement {
   const btn = document.createElement('button');
   if (vm.done) {
-    btn.className = 'done-btn is-done';
-    btn.append(icon(Check, 13), 'Afgehandeld');
-    if (vm.done_at) btn.title = `Afgehandeld ${fmtRelative(vm.done_at)} — klik om te heropenen`;
-    else btn.title = 'Klik om te heropenen';
+    // Auto-closed meldingen look the same, but say so on hover: nobody
+    // clicked this one, it just aged out.
+    btn.className = `done-btn is-done${vm.done_auto ? ' is-auto' : ''}`;
+    btn.append(icon(Check, 13), vm.done_auto ? 'Automatisch' : 'Afgehandeld');
+    const what = vm.done_auto ? 'Automatisch afgehandeld' : 'Afgehandeld';
+    if (vm.done_at) btn.title = `${what} ${fmtRelative(vm.done_at)} — klik om te heropenen`;
+    else btn.title = `${what} — klik om te heropenen`;
   } else {
     btn.className = 'done-btn';
     btn.append(icon(Check, 13), 'Afhandelen');

@@ -235,6 +235,12 @@ main {
   background: color-mix(in srgb, var(--ok) 14%, transparent);
   color: var(--ok);
 }
+/* Aged out on its own rather than handled by someone: same shape, no green. */
+.done-btn.is-done.is-auto {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+}
 .done-btn:disabled { opacity: .5; cursor: progress; }
 .vm .meta .when { color: var(--text-2); font-weight: 550; }
 .vm .meta .spacer { flex: 1; }

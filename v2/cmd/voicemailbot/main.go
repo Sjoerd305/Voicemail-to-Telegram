@@ -105,6 +105,10 @@ func run(configPath string) error {
 	if cfg.Storage.AudioRetentionDays > 0 {
 		go pruneAudioLoop(ctx, st, cfg.Storage.AudioRetentionDays)
 	}
+	if cfg.AutoDoneAfter > 0 {
+		go autoDoneLoop(ctx, st, cfg.AutoDoneAfter)
+		slog.Info("auto-done enabled", "after", cfg.AutoDoneAfter)
+	}
 
 	var srv *http.Server
 	if cfg.Web.Enabled {
@@ -142,6 +146,52 @@ func run(configPath string) error {
 		}
 	}
 	return nil
+}
+
+// autoDoneLoop marks voicemails that stayed open for longer than window as
+// afgehandeld, once at startup and then every few minutes. Only the dashboard
+// state changes: nothing is sent to Telegram and no PBX command runs.
+func autoDoneLoop(ctx context.Context, st *store.Store, window time.Duration) {
+	sweep := func() {
+		n, err := st.AutoDone(time.Now(), window)
+		if err != nil {
+			slog.Error("auto-done failed", "err", err)
+			st.LogEvent("error", fmt.Sprintf("automatisch afhandelen mislukt: %v", err))
+			return
+		}
+		if n > 0 {
+			slog.Info("auto-done", "closed", n, "older_than", window)
+			st.LogEvent("done", fmt.Sprintf("%d melding(en) automatisch afgehandeld (ouder dan %s)", n, formatDuration(window)))
+		}
+	}
+	sweep()
+	// A voicemail closes at most this long after its deadline; short enough
+	// that the dashboard never shows a stale open list for long.
+	interval := 5 * time.Minute
+	if window < interval {
+		interval = window
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
+	}
+}
+
+// formatDuration renders whole hours as "2 uur" for the Dutch activity log.
+func formatDuration(d time.Duration) string {
+	if d >= time.Hour && d%time.Hour == 0 {
+		return fmt.Sprintf("%d uur", int(d/time.Hour))
+	}
+	if d >= time.Minute && d%time.Minute == 0 {
+		return fmt.Sprintf("%d minuten", int(d/time.Minute))
+	}
+	return d.String()
 }
 
 func acquireLock(path string) (func(), error) {

@@ -182,3 +182,71 @@ func TestPruneAudio(t *testing.T) {
 		t.Fatalf("second prune: n=%d err=%v", n, err)
 	}
 }
+
+func TestAutoDone(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now()
+	// 1: old and open -> closed by the sweep.
+	old := &Voicemail{ReceivedAt: now.Add(-3 * time.Hour), Transcription: "oude storing"}
+	// 2: recent and open -> untouched.
+	fresh := &Voicemail{ReceivedAt: now.Add(-30 * time.Minute), Transcription: "verse storing"}
+	// 3: old but reopened by hand -> must stay open, and stay open on a
+	// second sweep as well.
+	reopened := &Voicemail{ReceivedAt: now.Add(-5 * time.Hour), Transcription: "heropend"}
+	for _, vm := range []*Voicemail{old, fresh, reopened} {
+		if err := s.SaveVoicemail(vm); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := s.AutoDone(now, 2*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("closed %d voicemails, want 2", n)
+	}
+
+	got, err := s.GetVoicemail(old.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Done || !got.DoneAuto {
+		t.Fatalf("old voicemail: done=%v auto=%v, want both true", got.Done, got.DoneAuto)
+	}
+	// done_at is the moment it aged out: two hours after it came in.
+	if want := old.ReceivedAt.Add(2 * time.Hour).UTC().Truncate(time.Second); !got.DoneAt.Equal(want) {
+		t.Fatalf("done_at %s, want %s", got.DoneAt, want)
+	}
+
+	got, err = s.GetVoicemail(fresh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Done {
+		t.Fatal("voicemail from 30 minutes ago was closed")
+	}
+
+	if _, err := s.SetDone(reopened.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	n, err = s.AutoDone(now, 2*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("second sweep closed %d voicemails, want 0", n)
+	}
+	got, err = s.GetVoicemail(reopened.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Done {
+		t.Fatal("a manually reopened voicemail was closed again by the sweep")
+	}
+
+	// A window of 0 disables the sweep entirely.
+	if n, err := s.AutoDone(now, 0); err != nil || n != 0 {
+		t.Fatalf("disabled sweep: closed %d, err %v", n, err)
+	}
+}

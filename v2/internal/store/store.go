@@ -20,6 +20,9 @@ type Voicemail struct {
 	MessageID     string    `json:"-"`
 	Done          bool      `json:"done"`
 	DoneAt        time.Time `json:"done_at,omitzero"`
+	// DoneAuto is set when the voicemail was closed by the age-out sweep
+	// instead of by a person clicking "Afhandelen".
+	DoneAuto bool `json:"done_auto,omitempty"`
 }
 
 type Event struct {
@@ -74,6 +77,18 @@ CREATE TABLE IF NOT EXISTS events (
 	// Added after the initial schema; empty string means "not done".
 	if !s.hasColumn("voicemails", "done_at") {
 		if _, err := s.db.Exec(`ALTER TABLE voicemails ADD COLUMN done_at TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if !s.hasColumn("voicemails", "done_auto") {
+		if _, err := s.db.Exec(`ALTER TABLE voicemails ADD COLUMN done_auto INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	// Set once someone reopens a voicemail; it takes the row out of the
+	// age-out sweep for good.
+	if !s.hasColumn("voicemails", "reopened") {
+		if _, err := s.db.Exec(`ALTER TABLE voicemails ADD COLUMN reopened INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return err
 		}
 	}
@@ -188,7 +203,7 @@ func (s *Store) ListVoicemails(opts ListOptions) (*Page, error) {
 	// Fetch one extra row to learn whether another page exists.
 	pageArgs = append(pageArgs, limit+1)
 	rows, err := s.db.Query(
-		`SELECT id, received_at, subject, email_text, transcription, audio_path, done_at
+		`SELECT id, received_at, subject, email_text, transcription, audio_path, done_at, done_auto
 		 FROM voicemails WHERE `+cond+` ORDER BY id DESC LIMIT ?`, pageArgs...)
 	if err != nil {
 		return nil, err
@@ -197,12 +212,13 @@ func (s *Store) ListVoicemails(opts ListOptions) (*Page, error) {
 	for rows.Next() {
 		var vm Voicemail
 		var at, doneAt string
-		if err := rows.Scan(&vm.ID, &at, &vm.Subject, &vm.EmailText, &vm.Transcription, &vm.AudioPath, &doneAt); err != nil {
+		var auto bool
+		if err := rows.Scan(&vm.ID, &at, &vm.Subject, &vm.EmailText, &vm.Transcription, &vm.AudioPath, &doneAt, &auto); err != nil {
 			return nil, err
 		}
 		vm.ReceivedAt, _ = time.Parse(time.RFC3339, at)
 		vm.HasAudio = vm.AudioPath != ""
-		vm.setDone(doneAt)
+		vm.setDone(doneAt, auto)
 		page.Items = append(page.Items, vm)
 	}
 	if err := rows.Err(); err != nil {
@@ -284,12 +300,13 @@ func (s *Store) Stats(now time.Time) (*Stats, error) {
 	return st, rows.Err()
 }
 
-func (vm *Voicemail) setDone(doneAt string) {
+func (vm *Voicemail) setDone(doneAt string, auto bool) {
 	if doneAt == "" {
 		return
 	}
 	vm.Done = true
 	vm.DoneAt, _ = time.Parse(time.RFC3339, doneAt)
+	vm.DoneAuto = auto
 }
 
 // SetDone marks a voicemail as handled (or reopens it) and returns the
@@ -299,7 +316,12 @@ func (s *Store) SetDone(id int64, done bool) (*Voicemail, error) {
 	if done {
 		doneAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	res, err := s.db.Exec(`UPDATE voicemails SET done_at = ? WHERE id = ?`, doneAt, id)
+	// From here on a person owns this state: done_auto goes back to 0, and
+	// reopening sets the sticky reopened flag so the age-out sweep leaves
+	// the voicemail open however long it takes to handle it.
+	res, err := s.db.Exec(
+		`UPDATE voicemails SET done_at = ?, done_auto = 0, reopened = reopened | ? WHERE id = ?`,
+		doneAt, boolToInt(!done), id)
 	if err != nil {
 		return nil, err
 	}
@@ -309,19 +331,27 @@ func (s *Store) SetDone(id int64, done bool) (*Voicemail, error) {
 	return s.GetVoicemail(id)
 }
 
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func (s *Store) GetVoicemail(id int64) (*Voicemail, error) {
 	var vm Voicemail
 	var at, doneAt string
+	var auto bool
 	err := s.db.QueryRow(
-		`SELECT id, received_at, subject, email_text, transcription, audio_path, done_at
+		`SELECT id, received_at, subject, email_text, transcription, audio_path, done_at, done_auto
 		 FROM voicemails WHERE id = ?`, id).
-		Scan(&vm.ID, &at, &vm.Subject, &vm.EmailText, &vm.Transcription, &vm.AudioPath, &doneAt)
+		Scan(&vm.ID, &at, &vm.Subject, &vm.EmailText, &vm.Transcription, &vm.AudioPath, &doneAt, &auto)
 	if err != nil {
 		return nil, err
 	}
 	vm.ReceivedAt, _ = time.Parse(time.RFC3339, at)
 	vm.HasAudio = vm.AudioPath != ""
-	vm.setDone(doneAt)
+	vm.setDone(doneAt, auto)
 	return &vm, nil
 }
 

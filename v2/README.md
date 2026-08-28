@@ -25,8 +25,13 @@ a small web dashboard.
 - **Web dashboard** — voicemail history with audio playback, transcription
   search, activity log and buttons for the same PBX actions. Voicemails can be
   marked as afgehandeld (with an open/done filter and open counter), so during
-  storingsdienst you can track which meldingen are handled. Plain TypeScript,
-  embedded into the binary; served on `:8080`.
+  storingsdienst you can track which meldingen are handled. Meldingen that stay
+  open longer than `auto_done_after` (2h by default) are closed automatically,
+  so the open list does not fill up with weekday meldingen handled by a party
+  that never opens the dashboard — this only changes the dashboard state, no
+  PBX command is run. Such a melding is labelled "Automatisch"; reopening one
+  by hand keeps it open for good. Plain TypeScript, embedded into the binary;
+  served on `:8080`.
 
 ## Differences from the Python version
 

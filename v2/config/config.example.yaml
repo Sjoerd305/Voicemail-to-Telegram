@@ -99,6 +99,13 @@ storage:
   audio_dir: /data/audio
   audio_retention_days: 90   # recordings older than this are deleted; text is kept forever (0 = keep audio forever)
 
+# Voicemails that are still open this long after they came in are marked as
+# afgehandeld automatically. On weekdays the meldingen are handled by a party
+# that does not use this dashboard, so without it the open list keeps growing.
+# Display only: no /deletevm or any other command is run, and reopening a
+# melding by hand keeps it open for good. Set to 0s to switch the sweep off.
+auto_done_after: 2h
+
 # Optional: free-form text appended below the dynamically generated /info
 # command list. The list itself is always built from this config.
 # info_file: /config/info.txt

@@ -122,3 +122,36 @@ func TestIMAPIdleDefaults(t *testing.T) {
 		t.Fatalf("fallback interval not clamped: %v", cfg.IMAP.IdleFallbackInterval)
 	}
 }
+
+func TestAutoDoneAfterDefault(t *testing.T) {
+	t.Setenv("IMAP_PASSWORD", "pw")
+	t.Setenv("TELEGRAM_TOKEN", "tok")
+
+	load := func(extra string) *Config {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		body := "imap:\n  server: mail.example.com\n  email: a@example.com\n" +
+			"  password: ${IMAP_PASSWORD}\n" +
+			"telegram:\n  token: ${TELEGRAM_TOKEN}\n  chat_id: -1\n" + extra
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+
+	// A config predating the setting gets the two-hour sweep.
+	if cfg := load(""); cfg.AutoDoneAfter != 2*time.Hour {
+		t.Fatalf("auto_done_after default: %v", cfg.AutoDoneAfter)
+	}
+	if cfg := load("auto_done_after: 30m\n"); cfg.AutoDoneAfter != 30*time.Minute {
+		t.Fatalf("auto_done_after override: %v", cfg.AutoDoneAfter)
+	}
+	// 0s switches the sweep off entirely.
+	if cfg := load("auto_done_after: 0s\n"); cfg.AutoDoneAfter != 0 {
+		t.Fatalf("auto_done_after: 0s was ignored: %v", cfg.AutoDoneAfter)
+	}
+}

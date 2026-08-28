@@ -126,8 +126,13 @@ type Config struct {
 	Cleanup       Cleanup            `yaml:"cleanup"`
 	Web           Web                `yaml:"web"`
 	Storage       Storage            `yaml:"storage"`
-	InfoFile      string             `yaml:"info_file"`
-	CustomersFile string             `yaml:"customers_file"`
+	// AutoDoneAfter closes voicemails that are still open this long after
+	// they came in, so the dashboard's open list reflects what is actually
+	// pending instead of everything the weekday party handled elsewhere.
+	// Display state only — no PBX command is run. 0s disables the sweep.
+	AutoDoneAfter time.Duration `yaml:"auto_done_after"`
+	InfoFile      string        `yaml:"info_file"`
+	CustomersFile string        `yaml:"customers_file"`
 }
 
 func Load(path string) (*Config, error) {
@@ -163,6 +168,7 @@ func Load(path string) (*Config, error) {
 			AudioDir:           "data/audio",
 			AudioRetentionDays: 90,
 		},
+		AutoDoneAfter: 2 * time.Hour,
 	}
 	if err := yaml.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
