@@ -56,6 +56,9 @@ a small web dashboard.
   descriptions, storingsdienst commands, customer lookups) so it can never go
   stale. An optional `info_file` is appended below the list for free-form
   notes.
+- **The Telegram command menu** (the "/" button) is registered from the same
+  data at startup, scoped to the group chat, so it updates on every deploy.
+  Customer lookups are left out of the menu; use `/info` for those.
 - Commands only work in the configured group chat (`telegram.chat_id`), not in
   any group the bot happens to be in.
 - The Google service account key is mounted at runtime, not baked into the

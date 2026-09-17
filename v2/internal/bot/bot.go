@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -90,6 +91,7 @@ func (b *Bot) Run(ctx context.Context) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 30
 	updates := b.api.GetUpdatesChan(u)
+	b.registerCommands()
 	slog.Info("telegram command listener started")
 	for {
 		select {
@@ -140,6 +142,94 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		return
 	}
 	b.reply(msg, "Onbekend commando, zie /info")
+}
+
+// Telegram's limits for registered bot commands.
+const (
+	maxMenuCommands   = 100
+	maxDescriptionLen = 256
+)
+
+var validCommandName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
+
+// registerCommands publishes the command menu (the "/" button in Telegram)
+// for the group chat, so the list stays in step with the configuration.
+// Failure is logged only: a menu is a convenience, not a reason to refuse
+// to start.
+func (b *Bot) registerCommands() {
+	cmds := b.menuCommands()
+	scope := tgbotapi.NewBotCommandScopeChat(b.cfg.Telegram.ChatID)
+	if _, err := b.api.Request(tgbotapi.NewSetMyCommandsWithScope(scope, cmds...)); err != nil {
+		slog.Error("failed to register telegram command menu", "err", err)
+		return
+	}
+	slog.Info("telegram command menu registered", "count", len(cmds))
+}
+
+// menuCommands builds the command menu from the same sources as /info:
+// the fixed commands, the configured actions and the storingsdienst
+// switches. Customer lookups are left out on purpose; that file changes
+// without a restart and could push the list past Telegram's limit.
+func (b *Bot) menuCommands() []tgbotapi.BotCommand {
+	cmds := []tgbotapi.BotCommand{
+		{Command: "info", Description: "Toon alle commando's"},
+		{Command: "storingsdienst", Description: "Storingsdienst-commando's"},
+	}
+
+	names := make([]string, 0, len(b.cfg.Commands))
+	for name := range b.cfg.Commands {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		cmd := b.cfg.Commands[name]
+		desc := cmd.Description
+		if desc == "" {
+			desc = cmd.Success
+		}
+		cmds = append(cmds, tgbotapi.BotCommand{Command: name, Description: desc})
+	}
+
+	keys := make([]string, 0, len(b.cfg.PhoneNumbers))
+	for key := range b.cfg.PhoneNumbers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		cmds = append(cmds, tgbotapi.BotCommand{
+			Command:     actions.Slugify(key),
+			Description: "Storingsdienst naar " + key,
+		})
+	}
+
+	// Drop anything Telegram would reject, rather than losing the whole menu.
+	valid := cmds[:0]
+	seen := make(map[string]bool)
+	for _, c := range cmds {
+		if !validCommandName.MatchString(c.Command) || seen[c.Command] {
+			slog.Warn("skipping command in telegram menu", "command", c.Command)
+			continue
+		}
+		seen[c.Command] = true
+		c.Description = menuDescription(c.Description, c.Command)
+		valid = append(valid, c)
+		if len(valid) == maxMenuCommands {
+			break
+		}
+	}
+	return valid
+}
+
+// menuDescription keeps a description within Telegram's 3-256 characters.
+func menuDescription(desc, fallback string) string {
+	desc = strings.TrimSpace(desc)
+	if len(desc) < 3 {
+		desc = "/" + fallback
+	}
+	if len(desc) > maxDescriptionLen {
+		desc = string([]rune(desc)[:maxDescriptionLen-1]) + "…"
+	}
+	return desc
 }
 
 // senderName is who to credit for a command. A Telegram @username is

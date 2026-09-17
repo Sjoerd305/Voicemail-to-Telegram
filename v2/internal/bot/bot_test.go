@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,5 +76,52 @@ func TestSenderName(t *testing.T) {
 		if got := senderName(c.user); got != c.want {
 			t.Errorf("senderName(%+v) = %q, want %q", c.user, got, c.want)
 		}
+	}
+}
+
+func TestMenuCommands(t *testing.T) {
+	b := &Bot{cfg: &config.Config{
+		Commands: map[string]config.Command{
+			"deletevm": {Success: "Voicemail verwijderd.", Description: "Voicemail verwijderen van de centrale"},
+			"vivia":    {Success: "Storingsdienst naar Vivia"},
+			"Bad-Name": {Success: "Should be dropped"},
+			"info":     {Success: "Duplicate of the fixed command"},
+			"x":        {Success: "ok"},
+		},
+		PhoneNumbers: map[string]string{
+			"Sjoerd van Dijk": "0611111111",
+			"Roel Lambers":    "0622222222",
+		},
+	}}
+
+	got := b.menuCommands()
+	want := []tgbotapi.BotCommand{
+		{Command: "info", Description: "Toon alle commando's"},
+		{Command: "storingsdienst", Description: "Storingsdienst-commando's"},
+		{Command: "deletevm", Description: "Voicemail verwijderen van de centrale"},
+		{Command: "vivia", Description: "Storingsdienst naar Vivia"},
+		{Command: "x", Description: "ok"},
+		{Command: "roel_lambers", Description: "Storingsdienst naar Roel Lambers"},
+		{Command: "sjoerd_van_dijk", Description: "Storingsdienst naar Sjoerd van Dijk"},
+	}
+	// "ok" is under Telegram's 3-character minimum and is padded.
+	want[4].Description = "/x"
+	if len(got) != len(want) {
+		t.Fatalf("got %d commands, want %d:\n%+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("command %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestMenuCommandsCap(t *testing.T) {
+	cfg := &config.Config{Commands: map[string]config.Command{}}
+	for i := 0; i < 150; i++ {
+		cfg.Commands[fmt.Sprintf("cmd%03d", i)] = config.Command{Success: "ok ok"}
+	}
+	if got := (&Bot{cfg: cfg}).menuCommands(); len(got) != maxMenuCommands {
+		t.Errorf("got %d commands, want %d", len(got), maxMenuCommands)
 	}
 }
