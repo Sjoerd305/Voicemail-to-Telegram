@@ -102,11 +102,33 @@ func TestStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Open != 4 || st.Today != 1 || st.Week != 2 {
+	// The week runs from Friday 16:30, so the voicemail of Saturday 15 Aug
+	// still counts; the one from 20 days ago does not.
+	if st.Open != 4 || st.Today != 1 || st.Week != 3 {
 		t.Fatalf("open %d today %d week %d", st.Open, st.Today, st.Week)
 	}
 	if len(st.Days) != 14 || st.Days[13].Date != "2026-08-19" || st.Days[13].Count != 1 || st.Days[12].Count != 1 || st.Days[9].Count != 1 {
 		t.Fatalf("days: %+v", st.Days)
+	}
+}
+
+func TestWeekStart(t *testing.T) {
+	cases := []struct {
+		now, want time.Time
+	}{
+		// Wednesday -> the Friday before.
+		{time.Date(2026, 8, 19, 15, 0, 0, 0, time.Local), time.Date(2026, 8, 14, 16, 30, 0, 0, time.Local)},
+		// Friday before the handover -> still the previous week.
+		{time.Date(2026, 8, 21, 16, 29, 0, 0, time.Local), time.Date(2026, 8, 14, 16, 30, 0, 0, time.Local)},
+		// Friday at the handover -> new week starts now.
+		{time.Date(2026, 8, 21, 16, 30, 0, 0, time.Local), time.Date(2026, 8, 21, 16, 30, 0, 0, time.Local)},
+		// Sunday -> the Friday two days earlier.
+		{time.Date(2026, 8, 23, 3, 0, 0, 0, time.Local), time.Date(2026, 8, 21, 16, 30, 0, 0, time.Local)},
+	}
+	for _, c := range cases {
+		if got := WeekStart(c.now); !got.Equal(c.want) {
+			t.Errorf("WeekStart(%v) = %v, want %v", c.now, got, c.want)
+		}
 	}
 }
 

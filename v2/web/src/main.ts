@@ -76,13 +76,22 @@ let query = '';
 type Period = 'all' | 'today' | 'week' | 'month' | '90d';
 let period: Period = 'all';
 
+// The storingsdienst hands over on Friday at 16:30, so "this week" runs from
+// one handover to the next. Mirrors WeekStart in internal/store.
+function weekStart(now: Date): Date {
+  const daysBack = (now.getDay() - 5 + 7) % 7; // 5 = Friday
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack, 16, 30);
+  if (start > now) start.setDate(start.getDate() - 7);
+  return start;
+}
+
 // Start of the selected period in the browser's local time, or null for all.
 function periodStart(): Date | null {
   const now = new Date();
   const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   switch (period) {
     case 'today': return day;
-    case 'week': return new Date(day.getTime() - ((now.getDay() + 6) % 7) * 86_400_000);
+    case 'week': return weekStart(now);
     case 'month': return new Date(now.getFullYear(), now.getMonth(), 1);
     case '90d': return new Date(day.getTime() - 90 * 86_400_000);
     default: return null;

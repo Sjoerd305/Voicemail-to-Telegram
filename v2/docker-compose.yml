@@ -10,6 +10,9 @@ services:
       - ./config:/config
       - voicemail-data:/data
     environment:
+      # Local timezone for the dashboard counters and the Friday 16:30
+      # storingsdienst week boundary. The image defaults to this already.
+      - TZ=Europe/Amsterdam
       # Referenced from config.yaml as ${VAR}; put the values in a .env file
       # next to this compose file (or remove these lines and write the
       # secrets directly in config.yaml).

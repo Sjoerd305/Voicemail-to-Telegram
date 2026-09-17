@@ -252,6 +252,25 @@ type DayCount struct {
 
 const statsDays = 14
 
+// The storingsdienst hands over on Friday at 16:30, so "this week" on the
+// dashboard runs from one handover to the next rather than Monday to Sunday.
+const (
+	weekStartDay    = time.Friday
+	weekStartHour   = 16
+	weekStartMinute = 30
+)
+
+// WeekStart returns the most recent Friday 16:30 (local time) at or before now.
+func WeekStart(now time.Time) time.Time {
+	now = now.In(time.Local)
+	daysBack := (int(now.Weekday()) - int(weekStartDay) + 7) % 7
+	start := time.Date(now.Year(), now.Month(), now.Day()-daysBack, weekStartHour, weekStartMinute, 0, 0, time.Local)
+	if start.After(now) {
+		start = start.AddDate(0, 0, -7)
+	}
+	return start
+}
+
 func (s *Store) Stats(now time.Time) (*Stats, error) {
 	st := &Stats{}
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM voicemails WHERE done_at = ''`).Scan(&st.Open); err != nil {
@@ -259,8 +278,7 @@ func (s *Store) Stats(now time.Time) (*Stats, error) {
 	}
 	now = now.In(time.Local)
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
-	// ISO week starts on Monday.
-	startOfWeek := startOfDay.AddDate(0, 0, -((int(now.Weekday()) + 6) % 7))
+	startOfWeek := WeekStart(now)
 	firstDay := startOfDay.AddDate(0, 0, -(statsDays - 1))
 	st.Days = make([]DayCount, statsDays)
 	for i := range st.Days {
