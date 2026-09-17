@@ -276,7 +276,6 @@ func (b *Bot) infoMessage() string {
 	var sb strings.Builder
 	sb.WriteString("Beschikbare commando's:\n\n")
 	sb.WriteString("/info – Toon dit bericht\n")
-	sb.WriteString("/storingsdienst – Storingsdienst-commando's\n")
 
 	names := make([]string, 0, len(b.cfg.Commands))
 	for name := range b.cfg.Commands {
