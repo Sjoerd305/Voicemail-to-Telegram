@@ -17,7 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
 )
 
 type Runner struct {

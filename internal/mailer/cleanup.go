@@ -8,8 +8,8 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/store"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
 )
 
 // Cleanup archives everything in INBOX into a per-week folder, e.g.

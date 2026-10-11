@@ -1,3 +1,8 @@
+# Pinned so the data volume stays v2_voicemail-data now that the app no
+# longer lives in a v2/ folder (compose derives names from the folder).
+name: v2
+
+
 services:
   voicemailapp:
     build: .

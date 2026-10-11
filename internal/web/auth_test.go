@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
 )
 
 func testAuth() *googleAuth {

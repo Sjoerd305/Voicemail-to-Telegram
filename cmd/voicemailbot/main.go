@@ -14,13 +14,13 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/actions"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/bot"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/mailer"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/store"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/transcribe"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/web"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/actions"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/bot"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/mailer"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/transcribe"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/web"
 )
 
 func main() {

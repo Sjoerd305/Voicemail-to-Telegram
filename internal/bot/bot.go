@@ -16,9 +16,9 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/actions"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/store"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/actions"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
 )
 
 type Bot struct {

@@ -20,9 +20,9 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-message/mail"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/store"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/transcribe"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/transcribe"
 )
 
 // Notifier is the part of the Telegram bot the watcher needs.

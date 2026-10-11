@@ -1,4 +1,4 @@
-module github.com/Sjoerd305/Voicemail-to-Telegram/v2
+module github.com/Sjoerd305/Voicemail-to-Telegram
 
 go 1.25.0
 

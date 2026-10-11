@@ -1,2 +1,9 @@
-debug.log
-logs
+web/node_modules/
+data/
+config/config.yaml
+config/googlekey.json
+config/customers.json
+config/info.txt
+/voicemailbot
+.env
+.DS_Store

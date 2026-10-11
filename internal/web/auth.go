@@ -19,7 +19,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
 )
 
 const (

@@ -3,7 +3,7 @@ package actions
 import (
 	"testing"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
 )
 
 func TestSlugify(t *testing.T) {

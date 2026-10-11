@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/actions"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/config"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/mailer"
-	"github.com/Sjoerd305/Voicemail-to-Telegram/v2/internal/store"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/actions"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/mailer"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
 )
 
 func newTestServer(t *testing.T, password string) *httptest.Server {

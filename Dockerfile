@@ -1,38 +1,25 @@
-FROM python:3.11
+# Stage 1: build the TypeScript frontend
+FROM node:22-alpine AS frontend
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-fund --no-audit
+COPY web/ ./
+RUN mkdir -p ../internal/web/dist && npm run build
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    apt-transport-https \
-    ca-certificates \
-    gnupg \
-    curl \
-    sudo \
-    && apt-get clean
+# Stage 2: build the Go binary
+FROM golang:1.26-alpine AS backend
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+COPY --from=frontend /src/internal/web/dist ./internal/web/dist
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /voicemailbot ./cmd/voicemailbot
 
-# Install Python packages
-RUN python -m pip install --upgrade pip && \
-    python -m pip install google-cloud-speech pydub schedule paramiko requests nest_asyncio python-telegram-bot==21.3
-
-# Add Google Cloud SDK source and install
-RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.cloud.google.com/apt cloud-sdk main" \
-    | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
-    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - && \
-    apt-get update && apt-get install -y google-cloud-cli
-
-# Copy application files
-COPY main.py /config/googlekey.json main.sh telegram_listener.py emailcleanup.py .
-
-# Set environment variables
-ENV TZ="Europe/Amsterdam"
-
-# Ensure main.sh is executable
-RUN chmod +x main.sh
-
-# Activate Google Cloud API
-RUN gcloud auth activate-service-account voicemail-app@voicemail-396410.iam.gserviceaccount.com --key-file=googlekey.json --project=voicemail-396410
-
-RUN rm googlekey.json
-
-# Start the application
-CMD ["bash", "main.sh"]
+# Stage 3: minimal runtime image
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates tzdata
+ENV TZ=Europe/Amsterdam
+COPY --from=backend /voicemailbot /usr/local/bin/voicemailbot
+VOLUME ["/config", "/data"]
+EXPOSE 8080
+ENTRYPOINT ["voicemailbot", "-config", "/config/config.yaml"]
