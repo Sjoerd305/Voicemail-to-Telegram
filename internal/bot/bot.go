@@ -126,7 +126,7 @@ func (b *Bot) handleCommand(ctx context.Context, msg *tgbotapi.Message) {
 		b.reply(msg, b.storingsdienstHelp())
 		return
 	case "lol":
-		b.reply(msg, "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+		b.reply(msg, "https://www.youtube.com/watch?v=0q6yphdZhUA")
 		return
 	}
 
