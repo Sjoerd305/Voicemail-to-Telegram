@@ -115,6 +115,39 @@ type Storage struct {
 	AudioRetentionDays int `yaml:"audio_retention_days"`
 }
 
+// Xurrent checks whether a voicemail is followed by activity in Xurrent: a
+// new request or a note written by one of the tracked teams (e.g. Vivia, who
+// handle the weekday meldingen). Detection only: a voicemail without such
+// activity within Window is reported in Telegram and on the dashboard.
+type Xurrent struct {
+	Enabled bool `yaml:"enabled"`
+	// BaseURL is the regional API endpoint, e.g. https://api.xurrent.com/v1.
+	BaseURL string `yaml:"base_url"`
+	Account string `yaml:"account"` // sent as X-Xurrent-Account
+	Token   string `yaml:"token"`   // personal access token
+	// People are Xurrent person names (exact) whose activity counts, e.g.
+	// "Vivia", the account the weekday party works under.
+	People []string `yaml:"people"`
+	// PersonIDs are the same by id, for names that are not unique.
+	PersonIDs []int `yaml:"person_ids"`
+	// MemberTeams: the current members of these teams count as well.
+	MemberTeams []string `yaml:"member_teams"`
+	// RequestTeam, when set, limits the new requests that count to those
+	// on this team: a name ("2e lijn") or its numeric id, which needs no
+	// read access to teams. Notes always count, wherever they are.
+	RequestTeam string `yaml:"request_team"`
+	// Window is how long after the voicemail activity must appear.
+	Window time.Duration `yaml:"window"`
+	// RepeatWindow: a voicemail from a caller whose earlier voicemail within
+	// this period was already followed by activity counts as covered, since
+	// a repeat call usually lands on the existing request without a new note.
+	RepeatWindow time.Duration `yaml:"repeat_window"`
+}
+
+func (x Xurrent) HasPeople() bool {
+	return len(x.People)+len(x.PersonIDs)+len(x.MemberTeams) > 0
+}
+
 type Config struct {
 	IMAP          IMAP               `yaml:"imap"`
 	Telegram      Telegram           `yaml:"telegram"`
@@ -133,6 +166,7 @@ type Config struct {
 	AutoDoneAfter time.Duration `yaml:"auto_done_after"`
 	InfoFile      string        `yaml:"info_file"`
 	CustomersFile string        `yaml:"customers_file"`
+	Xurrent       Xurrent       `yaml:"xurrent"`
 }
 
 func Load(path string) (*Config, error) {
@@ -169,6 +203,11 @@ func Load(path string) (*Config, error) {
 			AudioRetentionDays: 90,
 		},
 		AutoDoneAfter: 2 * time.Hour,
+		Xurrent: Xurrent{
+			BaseURL:      "https://api.xurrent.com/v1",
+			Window:       time.Hour,
+			RepeatWindow: 4 * time.Hour,
+		},
 	}
 	if err := yaml.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
@@ -206,6 +245,17 @@ func Load(path string) (*Config, error) {
 		}
 		if cfg.Web.PublicURL == "" {
 			return nil, fmt.Errorf("web.public_url is required when google_auth is enabled (it forms the OAuth redirect URL)")
+		}
+	}
+	if x := cfg.Xurrent; x.Enabled {
+		if x.Token == "" || x.Account == "" {
+			return nil, fmt.Errorf("xurrent.token and xurrent.account are required when xurrent is enabled")
+		}
+		if !x.HasPeople() {
+			return nil, fmt.Errorf("xurrent.people, person_ids or member_teams must name whose activity counts")
+		}
+		if x.Window <= 0 {
+			return nil, fmt.Errorf("xurrent.window must be positive")
 		}
 	}
 	return cfg, nil

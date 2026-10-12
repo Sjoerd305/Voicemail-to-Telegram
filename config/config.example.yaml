@@ -106,6 +106,29 @@ storage:
 # melding by hand keeps it open for good. Set to 0s to switch the sweep off.
 auto_done_after: 2h
 
+# Checks whether each voicemail is followed by activity in Xurrent: a new
+# request on request_team, or a note typed by one of the people below. Without
+# activity within `window` a warning goes to Telegram and the dashboard shows
+# "Geen Xurrent-activiteit". Detection only; nothing is forwarded. Xurrent
+# failures are never read as "no activity". Try it on past voicemails first
+# with xurrent-backtest (see README); that works with enabled: false.
+xurrent:
+  enabled: false
+  base_url: https://api.xurrent.com/v1   # or api.au / api.uk / api.ch / api.us.xurrent.com
+  account: bedrijf                        # X-Xurrent-Account
+  # Personal access token. Needs read access to requests and notes; people
+  # and teams only when they are given by name below (ids need no lookup).
+  token: ${XURRENT_TOKEN}
+  people:                                 # exact Xurrent names whose activity counts
+    - Vivia
+  # person_ids: [1234]                    # the same by id, when a name is not unique
+  # member_teams: [Engineers]             # all current members of these teams count too
+  request_team: 2e lijn                   # only new requests on this team count (name or id)
+  window: 1h
+  # A repeat call from the same number within this period counts as covered
+  # when the earlier voicemail was followed by activity.
+  repeat_window: 4h
+
 # Optional: free-form text appended below the dynamically generated /info
 # command list. The list itself is always built from this config.
 # info_file: /config/info.txt

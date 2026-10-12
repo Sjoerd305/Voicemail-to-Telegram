@@ -26,6 +26,7 @@ services:
       - SSH_PASSWORD=${SSH_PASSWORD}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - XURRENT_TOKEN=${XURRENT_TOKEN}
 
 volumes:
   voicemail-data:

@@ -24,6 +24,8 @@ interface Voicemail {
   done: boolean;
   done_at?: string;
   done_auto?: boolean;
+  xurrent_status?: 'pending' | 'activity' | 'none' | 'error';
+  xurrent_detail?: string;
 }
 
 type Filter = 'all' | 'open' | 'done';
@@ -481,6 +483,22 @@ function doneButton(vm: Voicemail): HTMLButtonElement {
   return btn;
 }
 
+// Whether the weekday party picked the voicemail up in Xurrent; absent when
+// the check is off or the voicemail predates it.
+function xurrentBadge(vm: Voicemail): HTMLElement | null {
+  const labels = {
+    pending: 'Xurrent: wachten',
+    activity: 'Xurrent: opgepakt',
+    none: 'Geen Xurrent-activiteit',
+    error: 'Xurrent: onbekend',
+  } as const;
+  const status = vm.xurrent_status;
+  if (!status || !(status in labels)) return null;
+  const badge = el('span', `xurrent-badge is-${status}`, labels[status]);
+  badge.title = vm.xurrent_detail || (status === 'pending' ? 'Nog binnen het controlevenster' : labels[status]);
+  return badge;
+}
+
 // The PBX mail body contains a "Klantnaam: <naam>" line; surface it as the
 // card title.
 function extractCustomer(emailText: string): string {
@@ -517,7 +535,10 @@ function renderVoicemails(): void {
     const meta = el('div', 'meta');
     const when = el('span', 'when', fmtRelative(vm.received_at));
     when.title = fmtFull(vm.received_at);
-    meta.append(when, el('span', 'spacer'), el('span', '', `#${vm.id}`), doneButton(vm));
+    meta.append(when, el('span', 'spacer'));
+    const badge = xurrentBadge(vm);
+    if (badge) meta.append(badge);
+    meta.append(el('span', '', `#${vm.id}`), doneButton(vm));
     card.append(meta);
 
     const customer = extractCustomer(vm.email_text);

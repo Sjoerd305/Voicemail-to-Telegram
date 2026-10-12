@@ -33,6 +33,51 @@ web dashboard. A single Go binary.
   by hand keeps it open for good. Plain TypeScript, embedded into the binary;
   served on `:8080`.
 
+## Xurrent check
+
+On weekdays the meldingen are handled by an external party working in Xurrent
+under the user "Vivia", on the team "2e lijn". With `xurrent` configured, every
+new voicemail is checked for **activity** within `window` (1h) after it came
+in: a request created by one of the tracked `people` on `request_team`, or a
+note they typed on any request (mail, system and automation notes don't
+count; neither do outbound mails, which include the automatic
+acknowledgements sent in a colleague's name). Notes are read per request,
+from every request updated since the voicemail: the account-wide `/notes`
+listing only covers the account in the `X-Xurrent-Account` header, while the
+requests live in the service portal account, so it misses most notes. `member_teams` adds every member of a team, e.g. the engineers. Any
+activity counts — it is not matched to a specific customer — so meldingen that
+get merged into one request, or handled with a note on an existing request,
+are covered automatically. A repeat call from the same number within
+`repeat_window` counts as covered when the earlier voicemail was.
+
+Results show on the dashboard cards (opgepakt / geen activiteit / wachten /
+onbekend, with the details on hover) and in the activity log. A voicemail
+without activity gets a ⚠️ message in Telegram. If Xurrent cannot be reached
+the check stays open and is retried every 5 minutes; after a day it ends as
+"onbekend", never as "geen activiteit". Only voicemails received after the
+feature is switched on are checked.
+
+### Backtest
+
+`xurrent-backtest` runs the same check against the voicemails already in the
+database, read-only (nothing is written or sent). It only needs the `xurrent`
+settings; `enabled` may stay `false`. On the server:
+
+```sh
+docker compose run --rm --entrypoint xurrent-backtest voicemailapp \
+  -config /config/config.yaml -since 2026-08-01 -weekdays -hours 08:00-17:00 -csv /data/backtest.csv
+```
+
+The token needs read access to requests and notes, plus people and teams
+when those are configured by name. All activity of the period is fetched
+once — one call per request updated since `-since`, about 1300 for a month,
+well within the rate limit — and every voicemail is decided from that.
+It prints one line per voicemail, a summary with the time to the first
+activity, and a **control** measurement: how often there is activity in random
+windows without any voicemail. That is roughly the chance that a missed
+voicemail goes unnoticed because something unrelated happened in Xurrent at
+the same time. Try `-window 2h` to see whether a longer window changes much.
+
 ## Differences from the old Python version
 
 This replaced the three Python scripts (`main.py`, `telegram_listener.py`,

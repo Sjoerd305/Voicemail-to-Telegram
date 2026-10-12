@@ -23,6 +23,7 @@ import (
 	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/config"
 	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
 	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/transcribe"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/xurrent"
 )
 
 // Notifier is the part of the Telegram bot the watcher needs.
@@ -382,6 +383,9 @@ func (w *Watcher) processMessage(ctx context.Context, client *imapclient.Client,
 		Transcription: transcription,
 		AudioPath:     audioPath,
 		MessageID:     parsed.MessageID,
+	}
+	if w.cfg.Xurrent.Enabled {
+		vm.XurrentStatus = xurrent.StatusPending // picked up by the Xurrent monitor
 	}
 	if err := w.store.SaveVoicemail(vm); err != nil {
 		return fmt.Errorf("save voicemail: %w", err)

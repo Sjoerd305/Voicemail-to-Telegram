@@ -23,6 +23,10 @@ type Voicemail struct {
 	// DoneAuto is set when the voicemail was closed by the age-out sweep
 	// instead of by a person clicking "Afhandelen".
 	DoneAuto bool `json:"done_auto,omitempty"`
+	// Xurrent check: "" (not checked), pending, activity, none or error.
+	XurrentStatus    string `json:"xurrent_status,omitempty"`
+	XurrentDetail    string `json:"xurrent_detail,omitempty"`
+	XurrentRequestID int    `json:"xurrent_request_id,omitempty"`
 }
 
 type Event struct {
@@ -92,6 +96,17 @@ CREATE TABLE IF NOT EXISTS events (
 			return err
 		}
 	}
+	for _, col := range []struct{ name, def string }{
+		{"xurrent_status", "TEXT NOT NULL DEFAULT ''"},
+		{"xurrent_detail", "TEXT NOT NULL DEFAULT ''"},
+		{"xurrent_request_id", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if !s.hasColumn("voicemails", col.name) {
+			if _, err := s.db.Exec(`ALTER TABLE voicemails ADD COLUMN ` + col.name + ` ` + col.def); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -126,10 +141,10 @@ func (s *Store) IsProcessed(messageID string) (bool, error) {
 
 func (s *Store) SaveVoicemail(vm *Voicemail) error {
 	res, err := s.db.Exec(
-		`INSERT INTO voicemails (received_at, subject, email_text, transcription, audio_path, message_id)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO voicemails (received_at, subject, email_text, transcription, audio_path, message_id, xurrent_status)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		vm.ReceivedAt.UTC().Format(time.RFC3339), vm.Subject, vm.EmailText,
-		vm.Transcription, vm.AudioPath, vm.MessageID,
+		vm.Transcription, vm.AudioPath, vm.MessageID, vm.XurrentStatus,
 	)
 	if err != nil {
 		return err
@@ -203,23 +218,18 @@ func (s *Store) ListVoicemails(opts ListOptions) (*Page, error) {
 	// Fetch one extra row to learn whether another page exists.
 	pageArgs = append(pageArgs, limit+1)
 	rows, err := s.db.Query(
-		`SELECT id, received_at, subject, email_text, transcription, audio_path, done_at, done_auto
+		`SELECT `+voicemailColumns+`
 		 FROM voicemails WHERE `+cond+` ORDER BY id DESC LIMIT ?`, pageArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var vm Voicemail
-		var at, doneAt string
-		var auto bool
-		if err := rows.Scan(&vm.ID, &at, &vm.Subject, &vm.EmailText, &vm.Transcription, &vm.AudioPath, &doneAt, &auto); err != nil {
+		vm, err := scanVoicemail(rows)
+		if err != nil {
 			return nil, err
 		}
-		vm.ReceivedAt, _ = time.Parse(time.RFC3339, at)
-		vm.HasAudio = vm.AudioPath != ""
-		vm.setDone(doneAt, auto)
-		page.Items = append(page.Items, vm)
+		page.Items = append(page.Items, *vm)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -357,14 +367,19 @@ func boolToInt(b bool) int {
 }
 
 func (s *Store) GetVoicemail(id int64) (*Voicemail, error) {
+	return scanVoicemail(s.db.QueryRow(
+		`SELECT `+voicemailColumns+` FROM voicemails WHERE id = ?`, id))
+}
+
+const voicemailColumns = `id, received_at, subject, email_text, transcription, audio_path, done_at, done_auto,
+	xurrent_status, xurrent_detail, xurrent_request_id`
+
+func scanVoicemail(row interface{ Scan(...any) error }) (*Voicemail, error) {
 	var vm Voicemail
 	var at, doneAt string
 	var auto bool
-	err := s.db.QueryRow(
-		`SELECT id, received_at, subject, email_text, transcription, audio_path, done_at, done_auto
-		 FROM voicemails WHERE id = ?`, id).
-		Scan(&vm.ID, &at, &vm.Subject, &vm.EmailText, &vm.Transcription, &vm.AudioPath, &doneAt, &auto)
-	if err != nil {
+	if err := row.Scan(&vm.ID, &at, &vm.Subject, &vm.EmailText, &vm.Transcription, &vm.AudioPath, &doneAt, &auto,
+		&vm.XurrentStatus, &vm.XurrentDetail, &vm.XurrentRequestID); err != nil {
 		return nil, err
 	}
 	vm.ReceivedAt, _ = time.Parse(time.RFC3339, at)

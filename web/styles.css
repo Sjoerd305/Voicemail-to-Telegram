@@ -242,6 +242,17 @@ main {
   color: var(--muted);
 }
 .done-btn:disabled { opacity: .5; cursor: progress; }
+.xurrent-badge {
+  font-size: .72rem;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  cursor: default;
+}
+.xurrent-badge.is-activity { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.xurrent-badge.is-none { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.xurrent-badge.is-error { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
 .vm .meta .when { color: var(--text-2); font-weight: 550; }
 .vm .meta .spacer { flex: 1; }
 .vm .title-row { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; margin-top: .3rem; }

@@ -21,6 +21,7 @@ import (
 	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
 	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/transcribe"
 	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/web"
+	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/xurrent"
 )
 
 func main() {
@@ -108,6 +109,11 @@ func run(configPath string) error {
 	if cfg.AutoDoneAfter > 0 {
 		go autoDoneLoop(ctx, st, cfg.AutoDoneAfter)
 		slog.Info("auto-done enabled", "after", cfg.AutoDoneAfter)
+	}
+
+	if cfg.Xurrent.Enabled {
+		go xurrent.NewMonitor(cfg.Xurrent, st, tgBot).Run(ctx)
+		slog.Info("xurrent check enabled", "people", cfg.Xurrent.People, "request_team", cfg.Xurrent.RequestTeam, "window", cfg.Xurrent.Window)
 	}
 
 	var srv *http.Server
