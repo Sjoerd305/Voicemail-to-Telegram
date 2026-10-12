@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -22,6 +23,41 @@ type Client struct {
 	account string
 	token   string
 	http    *http.Client
+
+	mu   sync.Mutex
+	next time.Time // earliest moment the next call may start
+}
+
+// minInterval spaces calls out to at most 10 per second. Xurrent allows 20
+// per second (and 3600 per hour) per user; staying at half leaves room for
+// another process using the same token, e.g. a backtest next to the bot.
+const minInterval = 100 * time.Millisecond
+
+// throttle waits until this call may start.
+func (c *Client) throttle(ctx context.Context) error {
+	c.mu.Lock()
+	now := time.Now()
+	start := c.next
+	if start.Before(now) {
+		start = now
+	}
+	c.next = start.Add(minInterval)
+	c.mu.Unlock()
+	return sleepCtx(ctx, time.Until(start))
+}
+
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 func NewClient(baseURL, account, token string) *Client {
@@ -128,19 +164,15 @@ func (c *Client) RequestNotes(ctx context.Context, requestID int, personIDs []in
 // requestFields are the request fields the checks need.
 const requestFields = "id,subject,created_at,updated_at,created_by"
 
-// RequestsCreatedBy lists requests these people created in [from, to),
-// on team teamID when that is not 0.
-func (c *Client) RequestsCreatedBy(ctx context.Context, personIDs []int, teamID int, from, to time.Time) ([]Request, error) {
-	q := url.Values{
+// RequestsCreatedBy lists requests these people created in [from, to), on
+// any team: a request is often moved to another team after it was made.
+func (c *Client) RequestsCreatedBy(ctx context.Context, personIDs []int, from, to time.Time) ([]Request, error) {
+	var reqs []Request
+	err := c.list(ctx, "/requests", url.Values{
 		"created_by": {joinIDs(personIDs)},
 		"created_at": {timeRange(from, to)},
 		"fields":     {requestFields},
-	}
-	if teamID != 0 {
-		q.Set("team", strconv.Itoa(teamID))
-	}
-	var reqs []Request
-	err := c.list(ctx, "/requests", q, &reqs)
+	}, &reqs)
 	return reqs, err
 }
 
@@ -204,10 +236,13 @@ func (c *Client) list(ctx context.Context, path string, q url.Values, out any) e
 }
 
 // maxRetries is how often a rate-limited (429) call is retried.
-const maxRetries = 3
+const maxRetries = 6
 
 func (c *Client) get(ctx context.Context, u string) ([]byte, string, error) {
 	for attempt := 0; ; attempt++ {
+		if err := c.throttle(ctx); err != nil {
+			return nil, "", err
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, "", err
@@ -225,17 +260,16 @@ func (c *Client) get(ctx context.Context, u string) ([]byte, string, error) {
 			return nil, "", fmt.Errorf("xurrent: read body: %w", err)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < maxRetries {
-			wait := 10 * time.Second
+			// Retry-After when given, else back off 2s, 4s, 8s, ...
+			wait := time.Duration(2<<attempt) * time.Second
 			if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
 				wait = time.Duration(s) * time.Second
 			}
 			if wait > time.Minute {
 				wait = time.Minute
 			}
-			select {
-			case <-ctx.Done():
-				return nil, "", ctx.Err()
-			case <-time.After(wait):
+			if err := sleepCtx(ctx, wait); err != nil {
+				return nil, "", err
 			}
 			continue
 		}

@@ -38,7 +38,8 @@ web dashboard. A single Go binary.
 On weekdays the meldingen are handled by an external party working in Xurrent
 under the user "Vivia", on the team "2e lijn". With `xurrent` configured, every
 new voicemail is checked for **activity** within `window` (1h) after it came
-in: a request created by one of the tracked `people` on `request_team`, or a
+in: a request created by one of the tracked `people` (on any team, since
+requests are often moved after they are made), or a
 note they typed on any request (mail, system and automation notes don't
 count; neither do outbound mails, which include the automatic
 acknowledgements sent in a colleague's name). Notes are read per request,

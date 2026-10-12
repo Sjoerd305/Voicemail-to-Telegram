@@ -15,8 +15,7 @@ import (
 	"github.com/Sjoerd305/Voicemail-to-Telegram/internal/store"
 )
 
-// fakeXurrent serves the person "Vivia" (7), team "2e lijn" (3) and team
-// "Engineers" (5, members 8 and 9 over two pages), plus the given requests
+// fakeXurrent serves the person "Vivia" (7), team "Engineers" (5, members 8 and 9 over two pages), plus the given requests
 // and notes, filtering them like the real API. All notes are on request
 // #100, an older request that is updated whenever a note is added.
 type fakeXurrent struct {
@@ -26,6 +25,7 @@ type fakeXurrent struct {
 	fail       bool
 	wantPeople string // expected person/created_by filter
 	paths      []string
+	queries    []string
 }
 
 func (f *fakeXurrent) handler(t *testing.T) http.Handler {
@@ -35,6 +35,7 @@ func (f *fakeXurrent) handler(t *testing.T) http.Handler {
 		}
 		q := r.URL.Query()
 		f.paths = append(f.paths, r.URL.Path)
+		f.queries = append(f.queries, r.URL.RawQuery)
 		if f.fail && strings.HasPrefix(r.URL.Path, "/requests") {
 			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
 			return
@@ -54,7 +55,7 @@ func (f *fakeXurrent) handler(t *testing.T) http.Handler {
 			// account with the same name that must be ignored.
 			out = []Ref{{ID: 7, Name: "Vivia"}, {ID: 70, Name: "Vivia Test"}, {ID: 71, Name: "Vivia", Disabled: true}}
 		case "/teams":
-			out = []Ref{{ID: map[string]int{"2e lijn": 3, "Engineers": 5}[q.Get("name")], Name: q.Get("name")}}
+			out = []Ref{{ID: map[string]int{"Engineers": 5}[q.Get("name")], Name: q.Get("name")}}
 		case "/teams/5/members":
 			if q.Get("page") == "" {
 				w.Header().Set("Link", `<http://`+r.Host+`/teams/5/members?page=2>; rel="next"`)
@@ -116,7 +117,7 @@ func newTestChecker(t *testing.T, f *fakeXurrent) (*Checker, config.Xurrent) {
 	t.Cleanup(srv.Close)
 	cfg := config.Xurrent{
 		Enabled: true, BaseURL: srv.URL, Account: "acme", Token: "tok",
-		People: []string{"Vivia"}, RequestTeam: "2e lijn",
+		People: []string{"Vivia"},
 		Window: time.Hour, RepeatWindow: 4 * time.Hour,
 	}
 	return NewChecker(cfg), cfg
@@ -139,13 +140,10 @@ func TestCheckFindsNoteWithinWindow(t *testing.T) {
 	}
 }
 
-func TestCheckOnlyRequestsOnRequestTeam(t *testing.T) {
+func TestCheckRequestOnAnyTeamCounts(t *testing.T) {
 	f := &fakeXurrent{
-		requests: []Request{
-			{ID: 4520, Subject: "Ander team", CreatedAt: t0.Add(5 * time.Minute)},
-			{ID: 4521, Subject: "Lift defect", CreatedAt: t0.Add(10 * time.Minute)},
-		},
-		reqTeam: map[int]int{4520: 99, 4521: 3},
+		requests: []Request{{ID: 4521, Subject: "Lift defect", CreatedAt: t0.Add(10 * time.Minute)}},
+		reqTeam:  map[int]int{4521: 99}, // moved to another team since
 	}
 	c, _ := newTestChecker(t, f)
 	v, err := c.Check(context.Background(), t0, t0.Add(2*time.Hour))
@@ -155,15 +153,19 @@ func TestCheckOnlyRequestsOnRequestTeam(t *testing.T) {
 	if v.Status != StatusActivity || v.Activity.RequestID != 4521 {
 		t.Fatalf("got %+v", v.Activity)
 	}
+	for _, q := range f.queries {
+		if strings.Contains(q, "team=") {
+			t.Fatalf("request listing filtered on team: %s", q)
+		}
+	}
 }
 
-func TestNumericRequestTeamNeedsNoLookup(t *testing.T) {
+func TestPersonIDsNeedNoLookup(t *testing.T) {
 	f := &fakeXurrent{
 		requests: []Request{{ID: 4521, CreatedAt: t0.Add(10 * time.Minute)}},
-		reqTeam:  map[int]int{4521: 3},
 	}
 	_, cfg := newTestChecker(t, f)
-	cfg.People, cfg.PersonIDs, cfg.RequestTeam = nil, []int{7}, "3"
+	cfg.People, cfg.PersonIDs = nil, []int{7}
 	v, err := NewChecker(cfg).Check(context.Background(), t0, t0.Add(2*time.Hour))
 	if err != nil || v.Status != StatusActivity {
 		t.Fatalf("got %+v, %v", v, err)
@@ -316,5 +318,23 @@ func TestMonitorKeepsPendingOnError(t *testing.T) {
 	m.sweepAt(context.Background(), t0.Add(26*time.Hour))
 	if got, _ := st.GetVoicemail(vm.ID); got.XurrentStatus != StatusError {
 		t.Fatalf("status = %q, want error", got.XurrentStatus)
+	}
+}
+
+func TestClientRetriesAfterRateLimit(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, `{"message":"Too Many Requests"}`, http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"id":3,"name":"Engineers"}]`))
+	}))
+	defer srv.Close()
+	team, err := NewClient(srv.URL, "acme", "tok").FindTeam(context.Background(), "Engineers")
+	if err != nil || team.ID != 3 || calls != 2 {
+		t.Fatalf("team %+v, err %v, calls %d", team, err, calls)
 	}
 }

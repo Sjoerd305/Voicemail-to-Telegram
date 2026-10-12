@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,7 +51,6 @@ type Checker struct {
 
 	mu         sync.Mutex
 	people     map[int]string // person id -> label
-	teamID     int            // resolved RequestTeam, 0 when not set
 	resolvedAt time.Time
 }
 
@@ -103,17 +101,7 @@ func (c *Checker) People(ctx context.Context) (map[int]string, error) {
 		// for every voicemail. Refuse instead.
 		return nil, fmt.Errorf("xurrent: no people to track (member_teams have no members)")
 	}
-	// A numeric request_team is an id and needs no lookup, so the token
-	// does not need read access to teams.
-	teamID, err := strconv.Atoi(c.cfg.RequestTeam)
-	if err != nil && c.cfg.RequestTeam != "" {
-		team, err := c.client.FindTeam(ctx, c.cfg.RequestTeam)
-		if err != nil {
-			return nil, err
-		}
-		teamID = team.ID
-	}
-	c.people, c.teamID = people, teamID
+	c.people = people
 	c.resolvedAt = time.Now()
 	return people, nil
 }
@@ -122,7 +110,7 @@ func (c *Checker) People(ctx context.Context) (map[int]string, error) {
 const noteWorkers = 4
 
 // Activity lists what tracked people did in Xurrent in [from, to), oldest
-// first: requests they created (on the request team) and notes they typed
+// first: requests they created and notes they typed
 // on any request. Notes are read per request, from every request updated
 // since from, so a long range costs one call per updated request.
 func (c *Checker) Activity(ctx context.Context, from, to time.Time) ([]Activity, error) {
@@ -135,11 +123,7 @@ func (c *Checker) Activity(ctx context.Context, from, to time.Time) ([]Activity,
 		ids = append(ids, id)
 	}
 	sort.Ints(ids)
-	c.mu.Lock()
-	teamID := c.teamID
-	c.mu.Unlock()
-
-	created, err := c.client.RequestsCreatedBy(ctx, ids, teamID, from, to)
+	created, err := c.client.RequestsCreatedBy(ctx, ids, from, to)
 	if err != nil {
 		return nil, err
 	}

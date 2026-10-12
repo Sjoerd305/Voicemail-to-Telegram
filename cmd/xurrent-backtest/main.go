@@ -108,9 +108,6 @@ func run() error {
 	for _, label := range sortedValues(people) {
 		fmt.Println("  " + label)
 	}
-	if xc.RequestTeam != "" {
-		fmt.Printf("Nieuwe meldingen tellen alleen op team %s\n", xc.RequestTeam)
-	}
 	fmt.Printf("Venster %s, herhaalde oproep %s, periode %s t/m %s\n\n",
 		xurrent.FormatDuration(xc.Window), xurrent.FormatDuration(xc.RepeatWindow),
 		since.Format("2006-01-02"), until.Add(-time.Second).Format("2006-01-02"))

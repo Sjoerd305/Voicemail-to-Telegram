@@ -113,7 +113,7 @@ func run(configPath string) error {
 
 	if cfg.Xurrent.Enabled {
 		go xurrent.NewMonitor(cfg.Xurrent, st, tgBot).Run(ctx)
-		slog.Info("xurrent check enabled", "people", cfg.Xurrent.People, "request_team", cfg.Xurrent.RequestTeam, "window", cfg.Xurrent.Window)
+		slog.Info("xurrent check enabled", "people", cfg.Xurrent.People, "window", cfg.Xurrent.Window)
 	}
 
 	var srv *http.Server

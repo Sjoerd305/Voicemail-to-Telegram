@@ -132,10 +132,6 @@ type Xurrent struct {
 	PersonIDs []int `yaml:"person_ids"`
 	// MemberTeams: the current members of these teams count as well.
 	MemberTeams []string `yaml:"member_teams"`
-	// RequestTeam, when set, limits the new requests that count to those
-	// on this team: a name ("2e lijn") or its numeric id, which needs no
-	// read access to teams. Notes always count, wherever they are.
-	RequestTeam string `yaml:"request_team"`
 	// Window is how long after the voicemail activity must appear.
 	Window time.Duration `yaml:"window"`
 	// RepeatWindow: a voicemail from a caller whose earlier voicemail within
